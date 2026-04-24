@@ -72,6 +72,10 @@ function getAgentsDir(): string {
   return path.join(os.homedir(), '.claude', 'agents')
 }
 
+function getSkillsDir(): string {
+  return path.join(os.homedir(), '.claude', 'skills')
+}
+
 type AgentDef = { name: string; path: string; description?: string }
 
 function listAgents(): AgentDef[] {
@@ -114,6 +118,36 @@ function parseAgentDescription(filePath: string): string | undefined {
   } catch {
     return undefined
   }
+}
+
+type SkillDef = { name: string; path: string; description?: string }
+
+function listSkills(): SkillDef[] {
+  const dir = getSkillsDir()
+  let entries: fs.Dirent[]
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
+    console.error('[termhub] failed to list skills:', err)
+    return []
+  }
+  const out: SkillDef[] = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const skillMdPath = path.join(dir, entry.name, 'SKILL.md')
+    let stat
+    try {
+      stat = fs.statSync(skillMdPath)
+    } catch {
+      continue
+    }
+    if (!stat.isFile()) continue
+    const description = parseAgentDescription(skillMdPath)
+    out.push({ name: entry.name, path: skillMdPath, description })
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name))
+  return out
 }
 
 function loadAgentBody(name: string): string | null {
@@ -483,6 +517,18 @@ app.whenReady().then(async () => {
     const agentsDir = path.resolve(getAgentsDir())
     if (!resolved.startsWith(agentsDir + path.sep) && resolved !== agentsDir) {
       throw new Error('Refusing to open path outside agents dir')
+    }
+    const err = await shell.openPath(resolved)
+    if (err) throw new Error(err)
+  })
+
+  ipcMain.handle('skills:list', () => listSkills())
+
+  ipcMain.handle('skills:open', async (_event, filePath: string) => {
+    const resolved = path.resolve(filePath)
+    const skillsDir = path.resolve(getSkillsDir())
+    if (!resolved.startsWith(skillsDir + path.sep) && resolved !== skillsDir) {
+      throw new Error('Refusing to open path outside skills dir')
     }
     const err = await shell.openPath(resolved)
     if (err) throw new Error(err)

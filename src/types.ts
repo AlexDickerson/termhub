@@ -10,6 +10,12 @@ export type AgentDef = {
   description?: string
 }
 
+export type SkillDef = {
+  name: string
+  path: string
+  description?: string
+}
+
 export type Config = {
   mcpPort: number
   startupSessions: Array<{ cwd: string; command?: string; prompt?: string }>
@@ -39,6 +45,8 @@ export type TermhubApi = {
   appReady: () => void
   listAgents: () => Promise<AgentDef[]>
   openAgent: (path: string) => Promise<void>
+  listSkills: () => Promise<SkillDef[]>
+  openSkill: (path: string) => Promise<void>
 }
 
 declare global {

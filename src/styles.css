@@ -245,16 +245,16 @@ body,
   font-size: 11px;
 }
 
-/* ---------- Agent list ---------- */
+/* ---------- Generic entry list (agents, skills, etc.) ---------- */
 
-.agent-list,
+.entry-list,
 .mcp-list {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.agent-item {
+.entry-item {
   padding: 6px 8px;
   margin: 2px -8px;
   border-radius: 4px;
@@ -262,16 +262,16 @@ body,
   user-select: none;
 }
 
-.agent-item:hover {
+.entry-item:hover {
   background: var(--hover);
 }
 
-.agent-name {
+.entry-name {
   font-size: 13px;
   color: var(--text);
 }
 
-.agent-description {
+.entry-description {
   font-size: 11px;
   color: var(--text-dim);
   margin-top: 2px;

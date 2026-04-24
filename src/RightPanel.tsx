@@ -1,5 +1,6 @@
 import { CollapsibleSection } from './CollapsibleSection'
 import { AgentList } from './AgentList'
+import { SkillList } from './SkillList'
 import { McpList } from './McpList'
 import type { Session } from './types'
 
@@ -16,6 +17,9 @@ export function RightPanel({ activeSession }: Props) {
       <div className="right-panel-body">
         <CollapsibleSection title="Agents">
           <AgentList />
+        </CollapsibleSection>
+        <CollapsibleSection title="Skills">
+          <SkillList />
         </CollapsibleSection>
         <CollapsibleSection title="MCP">
           <McpList session={activeSession} />

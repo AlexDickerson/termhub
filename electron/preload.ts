@@ -79,6 +79,11 @@ const api = {
 
   openAgent: (path: string): Promise<void> =>
     ipcRenderer.invoke('agents:open', path),
+
+  listSkills: (): Promise<AgentDef[]> => ipcRenderer.invoke('skills:list'),
+
+  openSkill: (path: string): Promise<void> =>
+    ipcRenderer.invoke('skills:open', path),
 }
 
 contextBridge.exposeInMainWorld('termhub', api)
