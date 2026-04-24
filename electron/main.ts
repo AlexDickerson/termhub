@@ -231,23 +231,39 @@ function writeMcpConfigFile(port: number): string {
   return configPath
 }
 
-function injectClaudeFlags(
-  rawCommand: string,
-  sessionId: string,
-  opts: { resume?: boolean } = {},
-): string {
-  const trimmed = rawCommand.trim()
-  // Match `claude` as the leading word (with or without trailing args)
-  const m = /^claude(?:\s+([\s\S]*))?$/.exec(trimmed)
-  if (!m) return rawCommand
-  const args = m[1]
+function isClaudeCommand(cmd: string): boolean {
+  return /^claude(\s|$)/.test(cmd.trim())
+}
+
+// Quote a string so cmd.exe passes it as a single argument to claude.
+// - collapse whitespace (cmd doesn't allow embedded newlines in args)
+// - escape internal double-quotes by doubling them (cmd.exe convention)
+function quoteForCmd(s: string): string {
+  const cleaned = s.replace(/\r?\n+/g, ' ').replace(/\s+/g, ' ').trim()
+  const escaped = cleaned.replace(/"/g, '""')
+  return `"${escaped}"`
+}
+
+function buildClaudeCommand(opts: {
+  sessionId: string
+  agentBody?: string
+  userPrompt?: string
+  resume?: boolean
+}): string {
+  const flags: string[] = [`--mcp-config "${mcpConfigPath}"`]
   if (opts.resume) {
-    // On resume, drop user-provided args (a positional prompt would be sent
-    // again, double-posting the user's first message).
-    return `claude --mcp-config "${mcpConfigPath}" --resume "${sessionId}"`
+    flags.push(`--resume "${opts.sessionId}"`)
+    return `claude ${flags.join(' ')}`
   }
-  const flags = `--mcp-config "${mcpConfigPath}" --session-id "${sessionId}"`
-  return args ? `claude ${flags} ${args}` : `claude ${flags}`
+  flags.push(`--session-id "${opts.sessionId}"`)
+  if (opts.agentBody && opts.agentBody.length > 0) {
+    flags.push(`--append-system-prompt ${quoteForCmd(opts.agentBody)}`)
+  }
+  let cmd = `claude ${flags.join(' ')}`
+  if (opts.userPrompt && opts.userPrompt.length > 0) {
+    cmd += ` ${quoteForCmd(opts.userPrompt)}`
+  }
+  return cmd
 }
 
 function cleanEnv(): Record<string, string> {
@@ -306,31 +322,29 @@ function createSessionInternal(opts: {
   persistSessions()
 
   if (opts.command && opts.command.trim().length > 0) {
-    const finalCommand = injectClaudeFlags(opts.command, id, {
-      resume: opts.source === 'resume',
-    })
+    let finalCommand: string
+    if (isClaudeCommand(opts.command)) {
+      let agentBody: string | undefined
+      if (opts.source !== 'resume' && opts.agent) {
+        const body = loadAgentBody(opts.agent)
+        if (body) {
+          agentBody = body
+        } else {
+          console.warn(`[termhub] agent "${opts.agent}" not found in ${getAgentsDir()}`)
+        }
+      }
+      finalCommand = buildClaudeCommand({
+        sessionId: id,
+        agentBody,
+        userPrompt: opts.source !== 'resume' ? opts.prompt : undefined,
+        resume: opts.source === 'resume',
+      })
+    } else {
+      finalCommand = opts.command
+    }
     setTimeout(() => {
       if (sessions.has(id)) term.write(`${finalCommand}\r`)
     }, 150)
-  }
-
-  // Build the first user message: agent body (if any) + user prompt.
-  let firstMessage = opts.source !== 'resume' ? opts.prompt ?? '' : ''
-  if (opts.source !== 'resume' && opts.agent) {
-    const body = loadAgentBody(opts.agent)
-    if (body) {
-      firstMessage = firstMessage
-        ? `${body}\n\nUser request: ${firstMessage}`
-        : body
-    } else {
-      console.warn(`[termhub] agent "${opts.agent}" not found in ${getAgentsDir()}`)
-    }
-  }
-  if (firstMessage.length > 0) {
-    const sanitized = firstMessage.replace(/\r?\n+/g, ' ').replace(/\s+/g, ' ').trim()
-    setTimeout(() => {
-      if (sessions.has(id)) term.write(`${sanitized}\r`)
-    }, 2500)
   }
 
   if (opts.source !== 'ipc') {
