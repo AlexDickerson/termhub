@@ -8,7 +8,11 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 export type OpenSessionResult = { id: string; cwd: string }
 
 export type McpHooks = {
-  openClaudeSession: (req: { cwd: string; prompt?: string }) => OpenSessionResult
+  openClaudeSession: (req: {
+    cwd: string
+    prompt?: string
+    agent?: string
+  }) => OpenSessionResult
 }
 
 export type McpHandle = {
@@ -49,7 +53,7 @@ export async function startMcpServer(opts: {
       req.method === 'POST'
     ) {
       const body = await readBody(req).catch(() => '')
-      let parsed: { cwd?: unknown; prompt?: unknown }
+      let parsed: { cwd?: unknown; prompt?: unknown; agent?: unknown }
       try {
         parsed = body ? JSON.parse(body) : {}
       } catch (err) {
@@ -61,8 +65,9 @@ export async function startMcpServer(opts: {
         return
       }
       const prompt = typeof parsed.prompt === 'string' ? parsed.prompt : undefined
+      const agent = typeof parsed.agent === 'string' ? parsed.agent : undefined
       try {
-        const result = opts.hooks.openClaudeSession({ cwd: parsed.cwd, prompt })
+        const result = opts.hooks.openClaudeSession({ cwd: parsed.cwd, prompt, agent })
         respondJson(res, 200, result)
       } catch (err) {
         respondJson(res, 500, {

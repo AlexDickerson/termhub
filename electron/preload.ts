@@ -2,7 +2,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 type DataPayload = { id: string; data: string }
 type ExitPayload = { id: string; exitCode: number }
-type AddedPayload = { id: string; cwd: string; autoActivate?: boolean }
+type AddedPayload = { id: string; cwd: string; autoActivate?: boolean; command?: string }
+type AgentDef = { name: string; path: string; description?: string }
 
 const api = {
   createSession: (
@@ -57,22 +58,27 @@ const api = {
   },
 
   onSessionAdded: (
-    cb: (id: string, cwd: string, autoActivate: boolean) => void,
+    cb: (id: string, cwd: string, autoActivate: boolean, command?: string) => void,
   ): (() => void) => {
     const handler = (_e: Electron.IpcRendererEvent, p: AddedPayload) =>
-      cb(p.id, p.cwd, p.autoActivate ?? false)
+      cb(p.id, p.cwd, p.autoActivate ?? false, p.command)
     ipcRenderer.on('session:added', handler)
     return () => {
       ipcRenderer.off('session:added', handler)
     }
   },
 
-  listSessions: (): Promise<Array<{ id: string; cwd: string }>> =>
+  listSessions: (): Promise<Array<{ id: string; cwd: string; command?: string }>> =>
     ipcRenderer.invoke('sessions:list'),
 
   appReady: (): void => {
     ipcRenderer.send('app:ready')
   },
+
+  listAgents: (): Promise<AgentDef[]> => ipcRenderer.invoke('agents:list'),
+
+  openAgent: (path: string): Promise<void> =>
+    ipcRenderer.invoke('agents:open', path),
 }
 
 contextBridge.exposeInMainWorld('termhub', api)

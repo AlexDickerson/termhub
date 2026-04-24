@@ -38,6 +38,13 @@ async function main() {
           .string()
           .optional()
           .describe('Initial prompt to feed to the new Claude session as its first user message'),
+        agent: z
+          .string()
+          .optional()
+          .describe(
+            'Name of an agent definition (filename in ~/.claude/agents/ without .md). When provided, ' +
+              "the agent's system prompt is prepended to the first user message so the new session adopts that role.",
+          ),
       },
     },
     async (args) => {
@@ -45,7 +52,7 @@ async function main() {
         const response = await fetch(`${baseUrl}/internal/open_session`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cwd: args.cwd, prompt: args.prompt }),
+          body: JSON.stringify({ cwd: args.cwd, prompt: args.prompt, agent: args.agent }),
         })
         if (!response.ok) {
           const text = await response.text().catch(() => '')

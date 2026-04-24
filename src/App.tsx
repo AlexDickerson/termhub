@@ -3,6 +3,7 @@ import type { Terminal } from '@xterm/xterm'
 import type { FitAddon } from '@xterm/addon-fit'
 import { Sidebar } from './Sidebar'
 import { TerminalView } from './TerminalView'
+import { RightPanel } from './RightPanel'
 import type { Session } from './types'
 
 export type TerminalEntry = { term: Terminal; fit: FitAddon }
@@ -27,9 +28,9 @@ export default function App() {
     const offExit = window.termhub.onExit((id) => {
       removeSession(id)
     })
-    const offAdded = window.termhub.onSessionAdded((id, cwd, autoActivate) => {
+    const offAdded = window.termhub.onSessionAdded((id, cwd, autoActivate, command) => {
       setSessions((prev) =>
-        prev.some((s) => s.id === id) ? prev : [...prev, { id, cwd }],
+        prev.some((s) => s.id === id) ? prev : [...prev, { id, cwd, command }],
       )
       if (autoActivate) {
         setActiveId((curr) => curr ?? id)
@@ -128,6 +129,10 @@ export default function App() {
   }, [activeId])
 
   const grouped = useMemo(() => groupByCwd(sessions), [sessions])
+  const activeSession = useMemo(
+    () => sessions.find((s) => s.id === activeId) ?? null,
+    [sessions, activeId],
+  )
 
   return (
     <div className="app">
@@ -156,6 +161,7 @@ export default function App() {
           ))
         )}
       </main>
+      <RightPanel activeSession={activeSession} />
     </div>
   )
 }

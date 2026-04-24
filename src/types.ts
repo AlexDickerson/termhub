@@ -1,6 +1,13 @@
 export type Session = {
   id: string
   cwd: string
+  command?: string
+}
+
+export type AgentDef = {
+  name: string
+  path: string
+  description?: string
 }
 
 export type Config = {
@@ -26,10 +33,12 @@ export type TermhubApi = {
   onData: (cb: (id: string, data: string) => void) => () => void
   onExit: (cb: (id: string, exitCode: number) => void) => () => void
   onSessionAdded: (
-    cb: (id: string, cwd: string, autoActivate: boolean) => void,
+    cb: (id: string, cwd: string, autoActivate: boolean, command?: string) => void,
   ) => () => void
-  listSessions: () => Promise<Array<{ id: string; cwd: string }>>
+  listSessions: () => Promise<Array<{ id: string; cwd: string; command?: string }>>
   appReady: () => void
+  listAgents: () => Promise<AgentDef[]>
+  openAgent: (path: string) => Promise<void>
 }
 
 declare global {

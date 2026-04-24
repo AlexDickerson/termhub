@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, clipboard } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, clipboard, shell } from 'electron'
 import * as pty from '@lydell/node-pty'
 import * as path from 'node:path'
 import * as os from 'node:os'
@@ -65,6 +65,66 @@ function loadPersistedSessions(): PersistedSession[] {
       console.error('[termhub] failed to load persisted sessions:', err)
     }
     return []
+  }
+}
+
+function getAgentsDir(): string {
+  return path.join(os.homedir(), '.claude', 'agents')
+}
+
+type AgentDef = { name: string; path: string; description?: string }
+
+function listAgents(): AgentDef[] {
+  const dir = getAgentsDir()
+  let entries: string[]
+  try {
+    entries = fs.readdirSync(dir)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
+    console.error('[termhub] failed to list agents:', err)
+    return []
+  }
+  const out: AgentDef[] = []
+  for (const entry of entries) {
+    if (!entry.toLowerCase().endsWith('.md')) continue
+    const filePath = path.join(dir, entry)
+    let stat
+    try {
+      stat = fs.statSync(filePath)
+    } catch {
+      continue
+    }
+    if (!stat.isFile()) continue
+    const name = entry.replace(/\.md$/i, '')
+    const description = parseAgentDescription(filePath)
+    out.push({ name, path: filePath, description })
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name))
+  return out
+}
+
+function parseAgentDescription(filePath: string): string | undefined {
+  try {
+    const content = fs.readFileSync(filePath, 'utf8')
+    const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content)
+    if (!m) return undefined
+    const desc = /^description:\s*(.+)$/im.exec(m[1])
+    if (!desc) return undefined
+    return desc[1].trim().replace(/^["']|["']$/g, '')
+  } catch {
+    return undefined
+  }
+}
+
+function loadAgentBody(name: string): string | null {
+  const filePath = path.join(getAgentsDir(), `${name}.md`)
+  try {
+    const content = fs.readFileSync(filePath, 'utf8')
+    const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n([\s\S]*)$/.exec(content)
+    return (m ? m[1] : content).trim()
+  } catch (err) {
+    console.error(`[termhub] failed to load agent "${name}":`, err)
+    return null
   }
 }
 
@@ -164,6 +224,7 @@ function createSessionInternal(opts: {
   cwd: string
   command?: string
   prompt?: string
+  agent?: string
   source: 'ipc' | 'mcp' | 'startup' | 'resume'
 }): { id: string; cwd: string } {
   const id = opts.id ?? randomUUID()
@@ -214,10 +275,20 @@ function createSessionInternal(opts: {
     }, 150)
   }
 
-  // Don't replay prompts on resume — the original user message is already
-  // in claude's session history and would be double-posted.
-  if (opts.source !== 'resume' && opts.prompt && opts.prompt.length > 0) {
-    const sanitized = opts.prompt.replace(/\r?\n/g, ' ')
+  // Build the first user message: agent body (if any) + user prompt.
+  let firstMessage = opts.source !== 'resume' ? opts.prompt ?? '' : ''
+  if (opts.source !== 'resume' && opts.agent) {
+    const body = loadAgentBody(opts.agent)
+    if (body) {
+      firstMessage = firstMessage
+        ? `${body}\n\nUser request: ${firstMessage}`
+        : body
+    } else {
+      console.warn(`[termhub] agent "${opts.agent}" not found in ${getAgentsDir()}`)
+    }
+  }
+  if (firstMessage.length > 0) {
+    const sanitized = firstMessage.replace(/\r?\n+/g, ' ').replace(/\s+/g, ' ').trim()
     setTimeout(() => {
       if (sessions.has(id)) term.write(`${sanitized}\r`)
     }, 2500)
@@ -225,7 +296,12 @@ function createSessionInternal(opts: {
 
   if (opts.source !== 'ipc') {
     const autoActivate = opts.source === 'startup' || opts.source === 'resume'
-    mainWindow?.webContents.send('session:added', { id, cwd: opts.cwd, autoActivate })
+    mainWindow?.webContents.send('session:added', {
+      id,
+      cwd: opts.cwd,
+      command: opts.command,
+      autoActivate,
+    })
   }
 
   return { id, cwd: opts.cwd }
@@ -325,11 +401,12 @@ app.whenReady().then(async () => {
     mcpHandle = await startMcpServer({
       port: config.mcpPort,
       hooks: {
-        openClaudeSession: ({ cwd, prompt }) =>
+        openClaudeSession: ({ cwd, prompt, agent }) =>
           createSessionInternal({
             cwd,
             command: 'claude',
             prompt,
+            agent,
             source: 'mcp',
           }),
       },
@@ -391,8 +468,25 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('sessions:list', () =>
-    Array.from(sessions.values()).map((s) => ({ id: s.id, cwd: s.cwd })),
+    Array.from(sessions.values()).map((s) => ({
+      id: s.id,
+      cwd: s.cwd,
+      command: s.command,
+    })),
   )
+
+  ipcMain.handle('agents:list', () => listAgents())
+
+  ipcMain.handle('agents:open', async (_event, filePath: string) => {
+    // Only open files inside our agents dir, no traversal.
+    const resolved = path.resolve(filePath)
+    const agentsDir = path.resolve(getAgentsDir())
+    if (!resolved.startsWith(agentsDir + path.sep) && resolved !== agentsDir) {
+      throw new Error('Refusing to open path outside agents dir')
+    }
+    const err = await shell.openPath(resolved)
+    if (err) throw new Error(err)
+  })
 
   ipcMain.handle('dialog:pickFolder', async () => {
     if (!mainWindow) return null
