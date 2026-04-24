@@ -27,46 +27,35 @@ export default function App() {
     const offExit = window.termhub.onExit((id) => {
       removeSession(id)
     })
-    const offAdded = window.termhub.onSessionAdded((id, cwd) => {
-      // MCP-initiated session: main has already created the pty.
-      setSessions((prev) => (prev.some((s) => s.id === id) ? prev : [...prev, { id, cwd }]))
+    const offAdded = window.termhub.onSessionAdded((id, cwd, autoActivate) => {
+      setSessions((prev) =>
+        prev.some((s) => s.id === id) ? prev : [...prev, { id, cwd }],
+      )
+      if (autoActivate) {
+        setActiveId((curr) => curr ?? id)
+      }
     })
+
+    // Catch up with any sessions main already created (resumed/startup) before
+    // our listeners were attached, then signal that we're ready so main can
+    // create the rest.
+    void window.termhub.listSessions().then((existing) => {
+      if (existing.length > 0) {
+        setSessions((prev) => {
+          const seen = new Set(prev.map((s) => s.id))
+          return [...prev, ...existing.filter((s) => !seen.has(s.id))]
+        })
+        setActiveId((curr) => curr ?? existing[0].id)
+      }
+      window.termhub.appReady()
+    })
+
     return () => {
       offData()
       offExit()
       offAdded()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Open startup sessions from config.json
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const config = await window.termhub.getConfig()
-        for (const entry of config.startupSessions) {
-          if (cancelled) return
-          try {
-            const s = await window.termhub.createSession(
-              entry.cwd,
-              entry.command,
-              entry.prompt,
-            )
-            if (cancelled) return
-            setSessions((prev) => [...prev, s])
-            setActiveId((curr) => curr ?? s.id)
-          } catch (err) {
-            console.error('[termhub] startup session failed for', entry.cwd, err)
-          }
-        }
-      } catch (err) {
-        console.error('[termhub] failed to load config:', err)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
   }, [])
 
   const removeSession = useCallback((id: string) => {

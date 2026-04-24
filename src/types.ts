@@ -25,7 +25,11 @@ export type TermhubApi = {
   writeClipboard: (text: string) => void
   onData: (cb: (id: string, data: string) => void) => () => void
   onExit: (cb: (id: string, exitCode: number) => void) => () => void
-  onSessionAdded: (cb: (id: string, cwd: string) => void) => () => void
+  onSessionAdded: (
+    cb: (id: string, cwd: string, autoActivate: boolean) => void,
+  ) => () => void
+  listSessions: () => Promise<Array<{ id: string; cwd: string }>>
+  appReady: () => void
 }
 
 declare global {

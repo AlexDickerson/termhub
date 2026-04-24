@@ -9,6 +9,7 @@ import { startMcpServer, type McpHandle } from './mcp'
 type Session = {
   id: string
   cwd: string
+  command?: string
   term: pty.IPty
 }
 
@@ -17,6 +18,12 @@ type StartupSession = { cwd: string; command?: string; prompt?: string }
 type Config = {
   mcpPort: number
   startupSessions: StartupSession[]
+}
+
+type PersistedSession = {
+  id: string
+  cwd: string
+  command?: string
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -35,6 +42,44 @@ function getConfigPath(): string {
 
 function getMcpConfigPath(): string {
   return path.join(app.getPath('userData'), 'mcp-config.json')
+}
+
+function getSessionsPath(): string {
+  return path.join(app.getPath('userData'), 'sessions.json')
+}
+
+function loadPersistedSessions(): PersistedSession[] {
+  try {
+    const raw = fs.readFileSync(getSessionsPath(), 'utf8')
+    const arr = JSON.parse(raw)
+    if (!Array.isArray(arr)) return []
+    return arr.filter(
+      (s): s is PersistedSession =>
+        s != null &&
+        typeof s.id === 'string' &&
+        typeof s.cwd === 'string' &&
+        (s.command === undefined || typeof s.command === 'string'),
+    )
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.error('[termhub] failed to load persisted sessions:', err)
+    }
+    return []
+  }
+}
+
+function persistSessions() {
+  const list: PersistedSession[] = Array.from(sessions.values()).map((s) => ({
+    id: s.id,
+    cwd: s.cwd,
+    command: s.command,
+  }))
+  try {
+    fs.mkdirSync(path.dirname(getSessionsPath()), { recursive: true })
+    fs.writeFileSync(getSessionsPath(), JSON.stringify(list, null, 2))
+  } catch (err) {
+    console.error('[termhub] failed to persist sessions:', err)
+  }
 }
 
 function loadConfig(): Config {
@@ -87,14 +132,23 @@ function writeMcpConfigFile(port: number): string {
   return configPath
 }
 
-function injectMcpConfig(rawCommand: string): string {
+function injectClaudeFlags(
+  rawCommand: string,
+  sessionId: string,
+  opts: { resume?: boolean } = {},
+): string {
   const trimmed = rawCommand.trim()
   // Match `claude` as the leading word (with or without trailing args)
   const m = /^claude(?:\s+([\s\S]*))?$/.exec(trimmed)
   if (!m) return rawCommand
   const args = m[1]
-  const flag = `--mcp-config "${mcpConfigPath}"`
-  return args ? `claude ${flag} ${args}` : `claude ${flag}`
+  if (opts.resume) {
+    // On resume, drop user-provided args (a positional prompt would be sent
+    // again, double-posting the user's first message).
+    return `claude --mcp-config "${mcpConfigPath}" --resume "${sessionId}"`
+  }
+  const flags = `--mcp-config "${mcpConfigPath}" --session-id "${sessionId}"`
+  return args ? `claude ${flags} ${args}` : `claude ${flags}`
 }
 
 function cleanEnv(): Record<string, string> {
@@ -106,12 +160,13 @@ function cleanEnv(): Record<string, string> {
 }
 
 function createSessionInternal(opts: {
+  id?: string
   cwd: string
   command?: string
   prompt?: string
-  source: 'ipc' | 'mcp' | 'startup'
+  source: 'ipc' | 'mcp' | 'startup' | 'resume'
 }): { id: string; cwd: string } {
-  const id = randomUUID()
+  const id = opts.id ?? randomUUID()
   const shell = process.env.COMSPEC || 'cmd.exe'
   console.log(
     `[termhub] spawning ${shell} in ${opts.cwd} (id=${id.slice(0, 8)}, source=${opts.source})`,
@@ -144,27 +199,33 @@ function createSessionInternal(opts: {
     console.log(`[termhub] session ${id.slice(0, 8)} exited (code=${exitCode})`)
     mainWindow?.webContents.send('session:exit', { id, exitCode })
     sessions.delete(id)
+    persistSessions()
   })
 
-  sessions.set(id, { id, cwd: opts.cwd, term })
+  sessions.set(id, { id, cwd: opts.cwd, command: opts.command, term })
+  persistSessions()
 
   if (opts.command && opts.command.trim().length > 0) {
-    const finalCommand = injectMcpConfig(opts.command)
+    const finalCommand = injectClaudeFlags(opts.command, id, {
+      resume: opts.source === 'resume',
+    })
     setTimeout(() => {
       if (sessions.has(id)) term.write(`${finalCommand}\r`)
     }, 150)
   }
 
-  if (opts.prompt && opts.prompt.length > 0) {
-    // Wait for the launched program (claude) to be ready to accept input
+  // Don't replay prompts on resume — the original user message is already
+  // in claude's session history and would be double-posted.
+  if (opts.source !== 'resume' && opts.prompt && opts.prompt.length > 0) {
     const sanitized = opts.prompt.replace(/\r?\n/g, ' ')
     setTimeout(() => {
       if (sessions.has(id)) term.write(`${sanitized}\r`)
     }, 2500)
   }
 
-  if (opts.source === 'mcp') {
-    mainWindow?.webContents.send('session:added', { id, cwd: opts.cwd })
+  if (opts.source !== 'ipc') {
+    const autoActivate = opts.source === 'startup' || opts.source === 'resume'
+    mainWindow?.webContents.send('session:added', { id, cwd: opts.cwd, autoActivate })
   }
 
   return { id, cwd: opts.cwd }
@@ -210,6 +271,52 @@ function killAllSessions() {
   sessions.clear()
 }
 
+// Renderer signals readiness via 'app:ready' once it has subscribed to
+// session:data / session:added / session:exit. We defer creating the
+// startup + resume sessions until after that, otherwise early pty output
+// would be sent before any listener exists.
+let rendererReadyResolve: (() => void) | null = null
+const rendererReady = new Promise<void>((resolve) => {
+  rendererReadyResolve = resolve
+})
+
+function bootstrapSessions(config: Config) {
+  const persisted = loadPersistedSessions()
+  const occupiedCwds = new Set<string>()
+
+  for (const s of persisted) {
+    try {
+      createSessionInternal({
+        id: s.id,
+        cwd: s.cwd,
+        command: s.command,
+        source: 'resume',
+      })
+      occupiedCwds.add(s.cwd)
+    } catch (err) {
+      console.error(`[termhub] failed to resume session ${s.id.slice(0, 8)}:`, err)
+    }
+  }
+
+  for (const entry of config.startupSessions) {
+    if (occupiedCwds.has(entry.cwd)) {
+      console.log(`[termhub] skipping startup entry ${entry.cwd} (resumed from persistence)`)
+      continue
+    }
+    try {
+      createSessionInternal({
+        cwd: entry.cwd,
+        command: entry.command,
+        prompt: entry.prompt,
+        source: 'startup',
+      })
+      occupiedCwds.add(entry.cwd)
+    } catch (err) {
+      console.error('[termhub] startup session failed for', entry.cwd, err)
+    }
+  }
+}
+
 app.whenReady().then(async () => {
   const config = loadConfig()
   mcpConfigPath = writeMcpConfigFile(config.mcpPort)
@@ -231,7 +338,14 @@ app.whenReady().then(async () => {
     console.error('[termhub] failed to start MCP server:', err)
   }
 
+  ipcMain.once('app:ready', () => {
+    rendererReadyResolve?.()
+  })
+
   createWindow()
+
+  // Bootstrap once the renderer is listening
+  rendererReady.then(() => bootstrapSessions(config))
 
   ipcMain.handle(
     'session:create',
@@ -273,7 +387,12 @@ app.whenReady().then(async () => {
       // already dead
     }
     sessions.delete(payload.id)
+    persistSessions()
   })
+
+  ipcMain.handle('sessions:list', () =>
+    Array.from(sessions.values()).map((s) => ({ id: s.id, cwd: s.cwd })),
+  )
 
   ipcMain.handle('dialog:pickFolder', async () => {
     if (!mainWindow) return null
