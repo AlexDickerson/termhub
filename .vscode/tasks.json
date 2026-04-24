@@ -1,0 +1,42 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "vite: dev server",
+      "type": "npm",
+      "script": "dev:vite",
+      "isBackground": true,
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "silent",
+        "group": "termhub"
+      },
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "ready in"
+        }
+      }
+    },
+    {
+      "label": "build: electron main",
+      "type": "npm",
+      "script": "build:main",
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "silent",
+        "group": "termhub"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "dev: prepare",
+      "dependsOn": ["vite: dev server", "build: electron main"]
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+import { contextBridge, ipcRenderer } from 'electron'
+
+type DataPayload = { id: string; data: string }
+type ExitPayload = { id: string; exitCode: number }
+type AddedPayload = { id: string; cwd: string }
+
+const api = {
+  createSession: (
+    cwd: string,
+    command?: string,
+    prompt?: string,
+  ): Promise<{ id: string; cwd: string }> =>
+    ipcRenderer.invoke('session:create', { cwd, command, prompt }),
+
+  sendInput: (id: string, data: string): void => {
+    ipcRenderer.send('session:input', { id, data })
+  },
+
+  resize: (id: string, cols: number, rows: number): void => {
+    ipcRenderer.send('session:resize', { id, cols, rows })
+  },
+
+  close: (id: string): void => {
+    ipcRenderer.send('session:close', { id })
+  },
+
+  pickFolder: (): Promise<string | null> => ipcRenderer.invoke('dialog:pickFolder'),
+
+  home: (): Promise<string> => ipcRenderer.invoke('app:home'),
+
+  getConfig: (): Promise<{ startupSessions: Array<{ cwd: string }> }> =>
+    ipcRenderer.invoke('config:get'),
+
+  configPath: (): Promise<string> => ipcRenderer.invoke('config:path'),
+
+  readClipboard: (): Promise<string> => ipcRenderer.invoke('clipboard:read'),
+
+  writeClipboard: (text: string): void => {
+    ipcRenderer.send('clipboard:write', text)
+  },
+
+  onData: (cb: (id: string, data: string) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, p: DataPayload) => cb(p.id, p.data)
+    ipcRenderer.on('session:data', handler)
+    return () => {
+      ipcRenderer.off('session:data', handler)
+    }
+  },
+
+  onExit: (cb: (id: string, exitCode: number) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, p: ExitPayload) =>
+      cb(p.id, p.exitCode)
+    ipcRenderer.on('session:exit', handler)
+    return () => {
+      ipcRenderer.off('session:exit', handler)
+    }
+  },
+
+  onSessionAdded: (cb: (id: string, cwd: string) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, p: AddedPayload) =>
+      cb(p.id, p.cwd)
+    ipcRenderer.on('session:added', handler)
+    return () => {
+      ipcRenderer.off('session:added', handler)
+    }
+  },
+}
+
+contextBridge.exposeInMainWorld('termhub', api)
+
+export type TermhubApi = typeof api
