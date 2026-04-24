@@ -18,7 +18,12 @@ export type SkillDef = {
 
 export type Config = {
   mcpPort: number
-  startupSessions: Array<{ cwd: string; command?: string; prompt?: string }>
+  startupSessions: Array<{
+    cwd: string
+    command?: string
+    prompt?: string
+    agent?: string
+  }>
 }
 
 export type TermhubApi = {

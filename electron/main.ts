@@ -13,7 +13,12 @@ type Session = {
   term: pty.IPty
 }
 
-type StartupSession = { cwd: string; command?: string; prompt?: string }
+type StartupSession = {
+  cwd: string
+  command?: string
+  prompt?: string
+  agent?: string
+}
 
 type Config = {
   mcpPort: number
@@ -28,7 +33,7 @@ type PersistedSession = {
 
 const DEFAULT_CONFIG: Config = {
   mcpPort: 7787,
-  startupSessions: [{ cwd: 'E:/', command: 'claude' }],
+  startupSessions: [{ cwd: 'E:/', command: 'claude', agent: 'orchestrator' }],
 }
 
 const sessions = new Map<string, Session>()
@@ -418,6 +423,7 @@ function bootstrapSessions(config: Config) {
         cwd: entry.cwd,
         command: entry.command,
         prompt: entry.prompt,
+        agent: entry.agent,
         source: 'startup',
       })
       occupiedCwds.add(entry.cwd)
