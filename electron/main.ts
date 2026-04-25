@@ -267,20 +267,10 @@ function isClaudeCommand(cmd: string): boolean {
   return /^claude(\s|$)/.test(cmd.trim())
 }
 
-// Quote a string so cmd.exe passes it as a single argument to claude.
-// - collapse whitespace (cmd doesn't allow embedded newlines in args)
-// - escape internal double-quotes by doubling them (cmd.exe convention)
-function quoteForCmd(s: string): string {
-  const cleaned = s.replace(/\r?\n+/g, ' ').replace(/\s+/g, ' ').trim()
-  const escaped = cleaned.replace(/"/g, '""')
-  return `"${escaped}"`
-}
-
 function buildClaudeCommand(opts: {
   sessionId: string
   agent?: string
   model?: string
-  userPrompt?: string
   resume?: boolean
   dangerouslySkipPermissions?: boolean
 }): string {
@@ -305,11 +295,14 @@ function buildClaudeCommand(opts: {
   if (opts.dangerouslySkipPermissions) {
     flags.push('--dangerously-skip-permissions')
   }
-  let cmd = `claude ${flags.join(' ')}`
-  if (opts.userPrompt && opts.userPrompt.length > 0) {
-    cmd += ` ${quoteForCmd(opts.userPrompt)}`
-  }
-  return cmd
+  return `claude ${flags.join(' ')}`
+}
+
+// Wrap text in bracketed-paste markers + Enter. Claude's TUI (Ink) handles
+// bracketed paste atomically, so arbitrarily long / shell-special content
+// can be injected without cmd.exe seeing or trying to parse it.
+function bracketedPasteWithSubmit(text: string): string {
+  return `\x1b[200~${text}\x1b[201~\r`
 }
 
 function cleanEnv(): Record<string, string> {
@@ -385,7 +378,6 @@ function createSessionInternal(opts: {
         agent: opts.source !== 'resume' ? opts.agent : undefined,
         model: opts.model,
         dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
-        userPrompt: opts.source !== 'resume' ? opts.prompt : undefined,
         resume: opts.source === 'resume',
       })
     } else {
@@ -394,6 +386,18 @@ function createSessionInternal(opts: {
     setTimeout(() => {
       if (sessions.has(id)) term.write(`${finalCommand}\r`)
     }, 150)
+  }
+
+  // Send the prompt to claude's TUI as a bracketed paste, after it's had
+  // time to start. This avoids cmd.exe's quoting limits for prompts with
+  // embedded quotes, backticks, $(), <>, etc.
+  if (opts.source !== 'resume' && opts.prompt && opts.prompt.length > 0) {
+    const text = opts.prompt
+    setTimeout(() => {
+      if (sessions.has(id)) {
+        session.term.write(bracketedPasteWithSubmit(text))
+      }
+    }, 2500)
   }
 
   if (opts.source !== 'ipc') {
@@ -519,9 +523,8 @@ app.whenReady().then(async () => {
         sendInput: ({ sessionId, text }) => {
           const result = findSessionByIdOrPrefix(sessionId)
           if (!result.found) return { ok: false, error: result.error }
-          const sanitized = text.replace(/\r?\n+/g, ' ')
           try {
-            result.session.term.write(`${sanitized}\r`)
+            result.session.term.write(bracketedPasteWithSubmit(text))
             return { ok: true }
           } catch (err) {
             return {
