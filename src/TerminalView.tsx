@@ -124,6 +124,11 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
           return true
         }
 
+        // Prevent the browser from also firing a native 'paste' ClipboardEvent
+        // on the xterm textarea. Without this, xterm's own paste listener
+        // (registered on the textarea) fires after our term.paste() call,
+        // writing the clipboard text a second time.
+        e.preventDefault()
         void window.termhub.readClipboard().then((text) => {
           if (text) term.paste(text)
         })
