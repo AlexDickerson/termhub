@@ -316,6 +316,34 @@ body,
   position: relative;
   overflow: hidden;
   background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Primary (claude) pane — fills remaining space above the bottom shell. */
+.main-top {
+  flex: 1 1 auto;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Horizontal rule between the two stacked terminals. Fixed height; a
+   draggable resizer is future work. */
+.main-divider {
+  flex: 0 0 auto;
+  height: 4px;
+  background: var(--border);
+  cursor: row-resize;
+}
+
+/* Bottom shell pane — fixed v1 height. */
+.main-bottom {
+  flex: 0 0 220px;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+  border-top: 1px solid var(--border);
 }
 
 .terminal-pane {
