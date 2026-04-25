@@ -199,7 +199,7 @@ function createSessionInternal(opts: {
   permissionMode?: string
   name?: string
   source: 'ipc' | 'mcp' | 'startup' | 'resume'
-}): { id: string; cwd: string } {
+}): { id: string; cwd: string; promptSettled: Promise<void> } {
   const id = opts.id ?? randomUUID()
   const shell = process.env.COMSPEC || 'cmd.exe'
   console.log(
@@ -278,33 +278,47 @@ function createSessionInternal(opts: {
   // arrives while claude is mid-load (status 'busy') and Ink's submit
   // handler hasn't been wired yet. Bracketed-paste mode does work pre-
   // submit-wiring, so the text lands in the input box, but the trailing
-  // CR doesn't fire submit. Manifests dramatically under load (10
-  // simultaneous spawns) where claude's startup stretches well past any
-  // wall-clock guess.
+  // CR doesn't fire submit.
   //
   // Strategy: gate the paste on the JSONL watcher reporting status 'idle'
   // — that's the unambiguous "Ink is rendered, input prompt is showing,
-  // submit handler is wired" signal. Triggering on 'busy' or 'awaiting'
-  // would re-introduce the race. Fall back to a generous timer (15 s) in
-  // case claude never reaches idle (old version, hard failure, etc.) so
-  // we don't silently swallow the user's prompt.
-  let promptSent = false
-  const sendPromptOnce = () => {
-    if (promptSent) return
-    if (!sessions.has(id)) return
-    if (!opts.prompt || opts.prompt.length === 0) return
-    promptSent = true
-    writeBracketedPasteAndSubmit(session.term, opts.prompt)
-  }
+  // submit handler is wired" signal. Caller awaits `promptSettled` to
+  // serialize spawns: see openSessionQueue below.
+  //
+  // promptSettled resolves once delivery is complete (paste + CR
+  // written), or once we know it's never going to happen (fallback fired,
+  // session exited, no prompt provided).
   const wantsPrompt =
     opts.source !== 'resume' && opts.prompt !== undefined && opts.prompt.length > 0
+  let promptSent = false
+  let resolvePromptSettled: () => void = () => {}
+  const promptSettled: Promise<void> = wantsPrompt
+    ? new Promise<void>((resolve) => {
+        resolvePromptSettled = resolve
+      })
+    : Promise.resolve()
+
+  const sendPromptOnce = async () => {
+    if (promptSent) return
+    if (!sessions.has(id) || !opts.prompt || opts.prompt.length === 0) {
+      resolvePromptSettled()
+      return
+    }
+    promptSent = true
+    try {
+      await writeBracketedPasteAndSubmit(session.term, opts.prompt)
+    } finally {
+      resolvePromptSettled()
+    }
+  }
+
   if (wantsPrompt) {
     setTimeout(() => {
       if (!promptSent) {
         console.warn(
           `[termhub:session] ${id.slice(0, 8)} JSONL idle-readiness fallback fired (15s) — sending prompt anyway`,
         )
-        sendPromptOnce()
+        void sendPromptOnce()
       }
     }, 15000)
   }
@@ -318,9 +332,9 @@ function createSessionInternal(opts: {
       // (parked at the input prompt, submit handler wired). 'busy' and
       // 'awaiting' would race with submit-handler setup.
       if (!promptSent && wantsPrompt && next === 'idle') {
-        // 250ms grace for the input box's first paint after the status
-        // write, defensive against OS-level pty write batching.
-        setTimeout(sendPromptOnce, 250)
+        // Tiny grace for Ink's first paint after the status write,
+        // defensive against OS-level pty write batching.
+        setTimeout(() => { void sendPromptOnce() }, 250)
       }
       // 'failed' is only set on PTY exit — never override it from JSONL.
       if (session.status !== 'failed') {
@@ -346,6 +360,9 @@ function createSessionInternal(opts: {
       session.jsonlWatcher.stop()
       session.jsonlWatcher = null
     }
+    // Unblock any caller awaiting promptSettled — the session is gone, so
+    // the prompt is never going to be delivered.
+    resolvePromptSettled()
     // Emit the terminal status BEFORE the exit event so the renderer has
     // it set when it decides whether to keep the row visible.
     setStatus(session, exitCode === 0 ? 'idle' : 'failed')
@@ -411,7 +428,7 @@ function createSessionInternal(opts: {
     })
   }
 
-  return { id, cwd: opts.cwd }
+  return { id, cwd: opts.cwd, promptSettled }
 }
 
 function createWindow() {
@@ -535,11 +552,22 @@ app.whenReady().then(async () => {
   const config = loadConfig()
   mcpConfigPath = writeMcpConfigFile(config.mcpPort)
 
+  // Serialize MCP open_session calls. The orchestrator can fan out N
+  // parallel open_session requests; we chain each through this queue so
+  // session N+1 only begins spawning after session N has finished
+  // delivering its initial prompt (paste + CR written, or settled via
+  // fallback / exit). Without serialization, simultaneous spawns contend
+  // for CPU and I/O, claude takes longer to reach 'idle', and prompts
+  // pasted before the submit handler is fully wired land in the input
+  // box without firing submit. The HTTP layer in mcp.ts is unchanged —
+  // serialization happens entirely inside this hook.
+  let openSessionQueue: Promise<unknown> = Promise.resolve()
+
   try {
     mcpHandle = await startMcpServer({
       port: config.mcpPort,
       hooks: {
-        openClaudeSession: ({
+        openClaudeSession: async ({
           cwd,
           prompt,
           agent,
@@ -548,19 +576,37 @@ app.whenReady().then(async () => {
           allowDangerouslySkipPermissions,
           permissionMode,
           name,
-        }) =>
-          createSessionInternal({
-            cwd,
-            command: 'claude',
-            prompt,
-            agent,
-            model,
-            dangerouslySkipPermissions,
-            allowDangerouslySkipPermissions,
-            permissionMode,
-            name,
-            source: 'mcp',
-          }),
+        }) => {
+          // Wait for the previous open_session to fully settle. The
+          // .catch flattens any rejection from a prior link so a single
+          // failure doesn't poison the chain for everyone behind it.
+          const myTurn = openSessionQueue.catch(() => {})
+          let release!: (value: unknown) => void
+          openSessionQueue = new Promise((resolve) => { release = resolve })
+          await myTurn
+          try {
+            const result = createSessionInternal({
+              cwd,
+              command: 'claude',
+              prompt,
+              agent,
+              model,
+              dangerouslySkipPermissions,
+              allowDangerouslySkipPermissions,
+              permissionMode,
+              name,
+              source: 'mcp',
+            })
+            // Hold the queue until the prompt is delivered (or settled
+            // via fallback / session exit). The HTTP response goes back
+            // here, after the await — the orchestrator sees one session
+            // start fully before the next one begins.
+            await result.promptSettled
+            return { id: result.id, cwd: result.cwd }
+          } finally {
+            release(undefined)
+          }
+        },
         sendInput: ({ sessionId, text }) => {
           const result = findSessionByIdOrPrefix(sessionId)
           if (!result.found) return { ok: false, error: result.error }

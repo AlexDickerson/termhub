@@ -112,14 +112,17 @@ export function writeBracketedPasteAndSubmit(
   schedule: (cb: () => void) => void = (cb) => {
     setTimeout(cb, 250)
   },
-): void {
-  target.write(bracketedPaste(text))
-  schedule(() => {
-    try {
-      target.write('\r')
-    } catch {
-      // pty may have exited between paste and submit — swallow
-    }
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    target.write(bracketedPaste(text))
+    schedule(() => {
+      try {
+        target.write('\r')
+      } catch {
+        // pty may have exited between paste and submit — swallow
+      }
+      resolve()
+    })
   })
 }
 

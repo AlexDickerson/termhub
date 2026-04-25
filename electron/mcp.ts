@@ -9,6 +9,9 @@ import { MCP_ROUTES } from './mcp-routes'
 export type OpenSessionResult = { id: string; cwd: string }
 
 export type McpHooks = {
+  // Async because the implementation in main.ts serializes spawns and
+  // awaits prompt delivery before resolving — keeps simultaneous
+  // open_session calls from contending and racing the prompt-paste.
   openClaudeSession: (req: {
     cwd: string
     prompt?: string
@@ -18,7 +21,7 @@ export type McpHooks = {
     allowDangerouslySkipPermissions?: boolean
     permissionMode?: string
     name?: string
-  }) => OpenSessionResult
+  }) => Promise<OpenSessionResult> | OpenSessionResult
   sendInput: (req: { sessionId: string; text: string }) => {
     ok: boolean
     error?: string
@@ -100,7 +103,7 @@ export async function startMcpServer(opts: {
         typeof parsed.permissionMode === 'string' ? parsed.permissionMode : undefined
       const name = typeof parsed.name === 'string' ? parsed.name : undefined
       try {
-        const result = opts.hooks.openClaudeSession({
+        const result = await opts.hooks.openClaudeSession({
           cwd: parsed.cwd,
           prompt,
           agent,
