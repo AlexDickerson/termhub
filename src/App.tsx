@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { TitleBar } from './TitleBar'
 import { Sidebar } from './Sidebar'
 import { TerminalView } from './TerminalView'
 import { BottomTerminal } from './BottomTerminal'
 import { RightPanel } from './RightPanel'
 import { UsageModal } from './UsageModal'
+import { ConfirmCloseModal } from './ConfirmCloseModal'
 import type { Session } from './types'
 import type { TerminalEntry } from './useXterm'
 import { useSessions } from './useSessions'
 import { useSplitLayout } from './useSplitLayout'
+import { needsCloseConfirm } from './confirm-close'
 
 export default function App() {
   // Primary (claude) PTY xterm instances, keyed by session id. Owned here
@@ -39,6 +41,37 @@ export default function App() {
     useSplitLayout()
 
   const [showUsage, setShowUsage] = useState(false)
+  // Session id pending close confirmation, or null when no dialog is open.
+  const [pendingCloseId, setPendingCloseId] = useState<string | null>(null)
+
+  // Request to close a session. Shows confirm dialog for live sessions;
+  // closes immediately if the PTY has already exited (status 'failed').
+  const requestClose = useCallback(
+    (id: string) => {
+      if (needsCloseConfirm(statuses[id])) {
+        setPendingCloseId(id)
+      } else {
+        closeSession(id)
+      }
+    },
+    [statuses, closeSession],
+  )
+
+  const handleConfirmClose = useCallback(() => {
+    if (pendingCloseId !== null) {
+      closeSession(pendingCloseId)
+      setPendingCloseId(null)
+    }
+  }, [pendingCloseId, closeSession])
+
+  const handleCancelClose = useCallback(() => {
+    setPendingCloseId(null)
+  }, [])
+
+  const pendingCloseSession = useMemo(
+    () => (pendingCloseId !== null ? sessions.find((s) => s.id === pendingCloseId) ?? null : null),
+    [pendingCloseId, sessions],
+  )
 
   // Refit both terminals for the active session when the window resizes.
   useEffect(() => {
@@ -108,7 +141,7 @@ export default function App() {
           statuses={statuses}
           onNew={newSession}
           onSelect={setActiveId}
-          onClose={closeSession}
+          onClose={requestClose}
           onRename={renameSession}
         />
         <main className="main" ref={mainContainerRef}>
@@ -148,6 +181,13 @@ export default function App() {
         <RightPanel activeSession={activeSession} />
       </div>
       {showUsage && <UsageModal onClose={() => setShowUsage(false)} />}
+      {pendingCloseSession !== null && (
+        <ConfirmCloseModal
+          session={pendingCloseSession}
+          onConfirm={handleConfirmClose}
+          onCancel={handleCancelClose}
+        />
+      )}
     </div>
   )
 }
