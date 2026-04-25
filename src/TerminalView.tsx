@@ -26,6 +26,9 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
       const raf = requestAnimationFrame(() => {
         try {
           existing.fit.fit()
+          // Scroll to bottom after fit so the scrollbar extent is current before
+          // we jump — otherwise xterm may not be able to reach the last line.
+          existing.term.scrollToBottom()
           existing.term.focus()
         } catch {
           // ignore
@@ -163,6 +166,9 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
         for (const data of queue) term.write(data)
         pendingDataRef.current.delete(session.id)
       }
+      // Land at the bottom of any buffered content on first mount so the user
+      // sees the latest output rather than the top of a filled scrollback.
+      term.scrollToBottom()
     })
 
     return () => {
