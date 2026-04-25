@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AgentDef,
   Config,
+  SessionPr,
   SessionStatus,
   SkillDef,
 } from '../src/types'
@@ -9,6 +10,7 @@ import type {
 type DataPayload = { id: string; data: string }
 type ExitPayload = { id: string; exitCode: number }
 type StatusPayload = { id: string; status: SessionStatus }
+type PrPayload = { id: string; pr: SessionPr | null }
 type AddedPayload = {
   id: string
   cwd: string
@@ -158,6 +160,23 @@ const api = {
 
   openExternal: (url: string): void => {
     ipcRenderer.send('open-external', url)
+  },
+
+  getSessionPr: (sessionId: string): Promise<SessionPr | null> =>
+    ipcRenderer.invoke('session:pr:get', { id: sessionId }),
+
+  mergeSessionPr: (sessionId: string, prNumber: number): Promise<void> =>
+    ipcRenderer.invoke('session:pr:merge', { id: sessionId, prNumber }),
+
+  onSessionPrChanged: (
+    cb: (sessionId: string, pr: SessionPr | null) => void,
+  ): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, p: PrPayload) =>
+      cb(p.id, p.pr)
+    ipcRenderer.on('session:pr', handler)
+    return () => {
+      ipcRenderer.off('session:pr', handler)
+    }
   },
 }
 

@@ -67,6 +67,19 @@ export function setMainWindow(window: BrowserWindow | null): void {
   mainWindow = window
 }
 
+// Lifecycle callbacks registered by other modules (e.g. ipc-pr) to react
+// to session creation and closure without creating circular imports.
+const sessionCreatedCallbacks: Array<(id: string) => void> = []
+const sessionClosedCallbacks: Array<(id: string) => void> = []
+
+export function onSessionCreatedHook(cb: (id: string) => void): void {
+  sessionCreatedCallbacks.push(cb)
+}
+
+export function onSessionClosedHook(cb: (id: string) => void): void {
+  sessionClosedCallbacks.push(cb)
+}
+
 // Pure decision: should this transition produce a 'session:status' IPC
 // emission? Forces the very first emission per session id so the
 // renderer has a seeded value, then suppresses no-op (equal) transitions.
@@ -137,6 +150,7 @@ export function persistSessions(): void {
 export function deleteSession(id: string): void {
   sessions.delete(id)
   statusEmitted.delete(id)
+  for (const cb of sessionClosedCallbacks) cb(id)
 }
 
 export function createSessionInternal(opts: {
@@ -218,6 +232,9 @@ export function createSessionInternal(opts: {
   }
   sessions.set(id, session)
   persistSessions()
+
+  // Notify lifecycle listeners (e.g. ipc-pr poll loop) that a session was created.
+  for (const cb of sessionCreatedCallbacks) cb(id)
 
   // Seed the renderer with the initial status so the sidebar dot doesn't
   // default to 'idle' (green) while the session is actually working. The
@@ -328,6 +345,7 @@ export function createSessionInternal(opts: {
     }
     sessions.delete(id)
     statusEmitted.delete(id)
+    for (const cb of sessionClosedCallbacks) cb(id)
     persistSessions()
   })
 

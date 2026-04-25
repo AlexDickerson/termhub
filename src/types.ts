@@ -43,6 +43,14 @@ export type Config = {
   startupSessions: StartupSession[]
 }
 
+export type SessionPr = {
+  number: number
+  title: string
+  state: 'open' | 'merged' | 'closed'
+  url: string
+  ciState: 'pending' | 'success' | 'failure' | null
+}
+
 export type TermhubApi = {
   createSession: (cwd: string) => Promise<{ id: string; cwd: string }>
   sendInput: (id: string, data: string) => void
@@ -93,6 +101,11 @@ export type TermhubApi = {
   isMaximized: () => Promise<boolean>
   onMaximizeChange: (cb: (maximized: boolean) => void) => () => void
   openExternal: (url: string) => void
+  getSessionPr: (sessionId: string) => Promise<SessionPr | null>
+  mergeSessionPr: (sessionId: string, prNumber: number) => Promise<void>
+  onSessionPrChanged: (
+    cb: (sessionId: string, pr: SessionPr | null) => void,
+  ) => () => void
 }
 
 declare global {
