@@ -94,11 +94,6 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
           return true
         }
 
-        // Prevent the browser from also firing a native 'paste' ClipboardEvent
-        // on the xterm textarea. Without this, xterm's own paste listener
-        // (registered on the textarea) fires after our term.paste() call,
-        // writing the clipboard text a second time.
-        e.preventDefault()
         void window.termhub.readClipboard().then((text) => {
           if (text) term.paste(text)
         })
@@ -128,6 +123,16 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
       })
 
       term.open(container)
+
+      // Block xterm's built-in paste handler so our custom readClipboard path
+      // is the only one that writes to the PTY. xterm registers a 'paste'
+      // listener on its textarea; calling preventDefault() here stops that
+      // listener from also firing when the browser dispatches the ClipboardEvent
+      // after Ctrl+V. Without this, clipboard text is written twice: once by
+      // term.paste() in the custom key handler above, and once by xterm's own
+      // handlePasteEvent.
+      term.textarea?.addEventListener('paste', (ev) => ev.preventDefault(), true)
+
       try {
         fit.fit()
       } catch (err) {

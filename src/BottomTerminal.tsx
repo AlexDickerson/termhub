@@ -108,6 +108,14 @@ export function BottomTerminal({
       })
 
       term.open(container)
+
+      // Block xterm's built-in paste handler so our custom readClipboard path
+      // is the only one that writes to the PTY. Mirrors the same fix applied
+      // in TerminalView.tsx — without this, Ctrl+V writes the clipboard text
+      // twice: once by term.paste() in the custom key handler above, and once
+      // by xterm's own handlePasteEvent listener on the textarea.
+      term.textarea?.addEventListener('paste', (ev) => ev.preventDefault(), true)
+
       try {
         fit.fit()
       } catch (err) {
