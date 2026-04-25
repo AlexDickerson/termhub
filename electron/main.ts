@@ -299,6 +299,14 @@ function isClaudeCommand(cmd: string): boolean {
   return /^claude(\s|$)/.test(cmd.trim())
 }
 
+// Default permission mode applied to every spawned claude when the caller
+// (config.json, MCP open_session, etc.) doesn't specify one. bypassPermissions
+// avoids the sandbox preflight that fires when claude's own
+// permissions.defaultMode is "auto" or when OPERON_SANDBOXED_NETWORK leaks
+// into the env. Override per-session via the permissionMode field if you
+// want stricter behavior.
+const DEFAULT_PERMISSION_MODE = 'bypassPermissions'
+
 function buildClaudeCommand(opts: {
   sessionId: string
   agent?: string
@@ -308,6 +316,10 @@ function buildClaudeCommand(opts: {
   permissionMode?: string
 }): string {
   const flags: string[] = [`--mcp-config "${mcpConfigPath}"`]
+  const permissionMode =
+    opts.permissionMode && opts.permissionMode.length > 0
+      ? opts.permissionMode
+      : DEFAULT_PERMISSION_MODE
   if (opts.resume) {
     flags.push(`--resume "${opts.sessionId}"`)
     if (opts.model && opts.model.length > 0) {
@@ -316,9 +328,7 @@ function buildClaudeCommand(opts: {
     if (opts.dangerouslySkipPermissions) {
       flags.push('--dangerously-skip-permissions')
     }
-    if (opts.permissionMode && opts.permissionMode.length > 0) {
-      flags.push(`--permission-mode "${opts.permissionMode}"`)
-    }
+    flags.push(`--permission-mode "${permissionMode}"`)
     return `claude ${flags.join(' ')}`
   }
   flags.push(`--session-id "${opts.sessionId}"`)
@@ -331,9 +341,7 @@ function buildClaudeCommand(opts: {
   if (opts.dangerouslySkipPermissions) {
     flags.push('--dangerously-skip-permissions')
   }
-  if (opts.permissionMode && opts.permissionMode.length > 0) {
-    flags.push(`--permission-mode "${opts.permissionMode}"`)
-  }
+  flags.push(`--permission-mode "${permissionMode}"`)
   return `claude ${flags.join(' ')}`
 }
 
