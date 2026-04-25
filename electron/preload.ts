@@ -19,6 +19,7 @@ type AddedPayload = {
   name?: string
   repoRoot?: string
   repoLabel?: string
+  cli?: 'claude' | 'codex' | 'gemini'
 }
 
 const api = {
@@ -114,10 +115,11 @@ const api = {
       name?: string,
       repoRoot?: string,
       repoLabel?: string,
+      cli?: 'claude' | 'codex' | 'gemini',
     ) => void,
   ): (() => void) => {
     const handler = (_e: Electron.IpcRendererEvent, p: AddedPayload) =>
-      cb(p.id, p.cwd, p.autoActivate ?? false, p.command, p.name, p.repoRoot, p.repoLabel)
+      cb(p.id, p.cwd, p.autoActivate ?? false, p.command, p.name, p.repoRoot, p.repoLabel, p.cli)
     ipcRenderer.on('session:added', handler)
     return () => {
       ipcRenderer.off('session:added', handler)
@@ -125,7 +127,7 @@ const api = {
   },
 
   listSessions: (): Promise<
-    Array<{ id: string; cwd: string; command?: string; name?: string; repoRoot?: string; repoLabel?: string }>
+    Array<{ id: string; cwd: string; command?: string; name?: string; repoRoot?: string; repoLabel?: string; cli?: 'claude' | 'codex' | 'gemini' }>
   > => ipcRenderer.invoke('sessions:list'),
 
   appReady: (): void => {

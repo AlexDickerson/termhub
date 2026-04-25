@@ -15,6 +15,7 @@ export type PersistedSession = {
   permissionMode?: string
   dangerouslySkipPermissions?: boolean
   allowDangerouslySkipPermissions?: boolean
+  cli?: 'claude' | 'codex' | 'gemini'
 }
 
 // Type-guard parsing — we deliberately tolerate older / partial entries
@@ -37,7 +38,8 @@ export function loadPersistedSessions(): PersistedSession[] {
         (s.dangerouslySkipPermissions === undefined ||
           typeof s.dangerouslySkipPermissions === 'boolean') &&
         (s.allowDangerouslySkipPermissions === undefined ||
-          typeof s.allowDangerouslySkipPermissions === 'boolean'),
+          typeof s.allowDangerouslySkipPermissions === 'boolean') &&
+        (s.cli === undefined || s.cli === 'claude' || s.cli === 'codex' || s.cli === 'gemini'),
     )
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {

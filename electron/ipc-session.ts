@@ -83,6 +83,7 @@ export function registerSessionHandlers(): void {
       name: s.name,
       repoRoot: s.repoRoot,
       repoLabel: s.repoLabel,
+      cli: s.cli,
     })),
   )
 
