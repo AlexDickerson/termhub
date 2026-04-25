@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Session } from './types'
+import type { Session, SessionStatus } from './types'
 
 type ContextMenu = {
   sessionId: string
@@ -10,13 +10,29 @@ type ContextMenu = {
 type Props = {
   groups: Map<string, Session[]>
   activeId: string | null
+  statuses: Record<string, SessionStatus>
   onNew: () => void
   onSelect: (id: string) => void
   onClose: (id: string) => void
   onRename: (id: string, name: string) => Promise<void>
 }
 
-export function Sidebar({ groups, activeId, onNew, onSelect, onClose, onRename }: Props) {
+const STATUS_LABEL: Record<SessionStatus, string> = {
+  working: 'Working',
+  awaiting: 'Awaiting input',
+  idle: 'Idle',
+  failed: 'Failed',
+}
+
+export function Sidebar({
+  groups,
+  activeId,
+  statuses,
+  onNew,
+  onSelect,
+  onClose,
+  onRename,
+}: Props) {
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -89,6 +105,7 @@ export function Sidebar({ groups, activeId, onNew, onSelect, onClose, onRename }
     }
   }, [contextSession])
 
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -108,7 +125,9 @@ export function Sidebar({ groups, activeId, onNew, onSelect, onClose, onRename }
               {label}
             </div>
             <ul className="group-list">
-              {list.map((s, idx) => (
+              {list.map((s, idx) => {
+                const status = statuses[s.id] ?? 'idle'
+                return (
                 <li
                   key={s.id}
                   className={`item ${s.id === activeId ? 'active' : ''}`}
@@ -136,6 +155,11 @@ export function Sidebar({ groups, activeId, onNew, onSelect, onClose, onRename }
                     />
                   ) : (
                     <span className="item-label">
+                      <span
+                        className={`status-dot status-${status}`}
+                        title={STATUS_LABEL[status]}
+                        aria-label={STATUS_LABEL[status]}
+                      />
                       {s.name ? (
                         s.name
                       ) : (
@@ -157,7 +181,8 @@ export function Sidebar({ groups, activeId, onNew, onSelect, onClose, onRename }
                     ×
                   </button>
                 </li>
-              ))}
+                )
+              })}
             </ul>
           </div>
           )

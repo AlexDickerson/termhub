@@ -6,12 +6,13 @@ import { TerminalView } from './TerminalView'
 import { BottomTerminal } from './BottomTerminal'
 import { RightPanel } from './RightPanel'
 import { UsageModal } from './UsageModal'
-import type { Session } from './types'
+import type { Session, SessionStatus } from './types'
 
 export type TerminalEntry = { term: Terminal; fit: FitAddon }
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([])
+  const [statuses, setStatuses] = useState<Record<string, SessionStatus>>({})
   const [activeId, setActiveId] = useState<string | null>(null)
   const [showUsage, setShowUsage] = useState(false)
   // Primary (claude) PTY xterm instances, keyed by session id.
@@ -43,8 +44,18 @@ export default function App() {
         shellPendingDataRef.current.set(id, queue)
       }
     })
-    const offExit = window.termhub.onExit((id) => {
-      removeSession(id)
+    const offExit = window.termhub.onExit((id, exitCode) => {
+      // Keep failed sessions visible so the red status dot is observable.
+      // They can still be dismissed via the × button. Clean exits remove
+      // the row immediately as before.
+      if (exitCode === 0) {
+        removeSession(id)
+      }
+    })
+    const offStatus = window.termhub.onStatusChanged((id, status) => {
+      setStatuses((prev) =>
+        prev[id] === status ? prev : { ...prev, [id]: status },
+      )
     })
     // Shell PTY exiting independently (user typed `exit`) doesn't tear the
     // session down — only the primary exit does. We still drop the xterm
@@ -95,6 +106,7 @@ export default function App() {
       offData()
       offShellData()
       offExit()
+      offStatus()
       offShellExit()
       offAdded()
     }
@@ -114,6 +126,12 @@ export default function App() {
     }
     shellPendingDataRef.current.delete(id)
     setSessions((prev) => prev.filter((s) => s.id !== id))
+    setStatuses((prev) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
     setActiveId((curr) => {
       if (curr !== id) return curr
       // Pick the next remaining session, if any
@@ -216,6 +234,7 @@ export default function App() {
       <Sidebar
         groups={grouped}
         activeId={activeId}
+        statuses={statuses}
         onNew={newSession}
         onSelect={setActiveId}
         onClose={closeSession}

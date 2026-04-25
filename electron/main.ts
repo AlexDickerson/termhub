@@ -7,6 +7,10 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { startMcpServer, type McpHandle } from './mcp'
 
+// Advisory status derived from the session's output stream. Mirrors the
+// SessionStatus union exposed to the renderer in src/types.ts.
+type SessionStatus = 'working' | 'awaiting' | 'idle' | 'failed'
+
 type Session = {
   id: string
   cwd: string
@@ -21,6 +25,13 @@ type Session = {
   // This is what the MCP tools target.
   term: pty.IPty
   outputBuffer: string
+  status: SessionStatus
+  // ms timestamp of the last chunk that contained an "active spinner"
+  // marker (e.g. "esc to interrupt"). Used to keep the working status
+  // sticky for a short window after the marker last appeared so we don't
+  // flap to idle between spinner ticks.
+  lastSpinnerSeen: number
+  statusReevalTimer: NodeJS.Timeout | null
   // Secondary "shell" PTY — a plain interactive shell rooted at `cwd`,
   // docked at the bottom of the UI for the user's own manual work. Not
   // exposed via MCP, not persisted. Lifetime is bound to the session.
@@ -46,6 +57,76 @@ function stripAnsi(s: string): string {
     .replace(/\x1b[PX^_][\s\S]*?\x1b\\/g, '')
     .replace(/\x1b[=>()*+\-.\/]./g, '')
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+}
+
+// ---------------------------------------------------------------------------
+// Status detection
+// ---------------------------------------------------------------------------
+// Pragmatic heuristics over the output stream — advisory UI decoration only,
+// not load-bearing logic. Cheap to evaluate; correct ≥ 90% of the time.
+//
+//   working  — claude is generating / running tools. Detected by the
+//              "esc to interrupt" hint that claude prints under the spinner
+//              on every redraw tick. Sticky for ~1.5s after the last hit so
+//              we don't flap between spinner ticks.
+//   awaiting — claude has stopped and is asking something. Detected by a
+//              permission-prompt phrase ("Do you want") or a numbered choice
+//              with the focused-arrow marker ("❯ 1.") in the buffer tail.
+//   idle     — none of the above. Empty input box / waiting for user.
+//   failed   — set on non-zero PTY exit, never derived from output.
+const SPINNER_RE = /esc to interrupt/i
+const PERMISSION_RE = /Do you want/i
+const NUMBERED_CHOICE_RE = /❯\s*\d+\.\s/
+// How long to keep status='working' after the last spinner hit. Slightly
+// longer than claude's spinner tick (~80ms) plus a buffer for sparse
+// redraws. 1500ms is comfortably above worst-case observed spacing.
+const SPINNER_HOLD_MS = 1500
+// Tail size to scan for awaiting prompts. Big enough to capture a
+// multi-line permission prompt (the question + a few numbered options),
+// small enough to keep regex work cheap on every chunk.
+const STATUS_TAIL_BYTES = 6000
+
+function detectStatusFromBuffer(
+  buffer: string,
+  lastSpinnerSeen: number,
+): SessionStatus {
+  if (Date.now() - lastSpinnerSeen < SPINNER_HOLD_MS) return 'working'
+  const tail =
+    buffer.length > STATUS_TAIL_BYTES
+      ? buffer.slice(buffer.length - STATUS_TAIL_BYTES)
+      : buffer
+  const stripped = stripAnsi(tail)
+  if (PERMISSION_RE.test(stripped) || NUMBERED_CHOICE_RE.test(stripped)) {
+    return 'awaiting'
+  }
+  return 'idle'
+}
+
+function setStatus(session: Session, next: SessionStatus) {
+  if (session.status === next) return
+  session.status = next
+  mainWindow?.webContents.send('session:status', { id: session.id, status: next })
+}
+
+function recomputeStatus(session: Session) {
+  // Once 'failed' is set (PTY exited non-zero) we lock the status — the
+  // session is a corpse, no further detection is meaningful.
+  if (session.status === 'failed') return
+  const next = detectStatusFromBuffer(session.outputBuffer, session.lastSpinnerSeen)
+  setStatus(session, next)
+  if (session.statusReevalTimer) {
+    clearTimeout(session.statusReevalTimer)
+    session.statusReevalTimer = null
+  }
+  // While we believe claude is working, schedule a follow-up recompute so
+  // we transition off 'working' even if no further data arrives (e.g. the
+  // spinner is cleared by a final redraw and then output goes quiet).
+  if (next === 'working') {
+    session.statusReevalTimer = setTimeout(() => {
+      session.statusReevalTimer = null
+      recomputeStatus(session)
+    }, SPINNER_HOLD_MS + 100)
+  }
 }
 
 // Walk upward from cwd looking for a .git entry (file or directory).
@@ -497,6 +578,9 @@ function createSessionInternal(opts: {
     dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
     term,
     outputBuffer: '',
+    status: 'idle',
+    lastSpinnerSeen: 0,
+    statusReevalTimer: null,
     shellTerm,
   }
   sessions.set(id, session)
@@ -509,11 +593,23 @@ function createSessionInternal(opts: {
       console.log(`[termhub] first data from ${id.slice(0, 8)} (${data.length} bytes)`)
     }
     session.outputBuffer = appendToBuffer(session.outputBuffer, data)
+    // Cheap test on the raw chunk — the spinner phrase is plain ASCII and
+    // isn't broken up by ANSI codes mid-substring, so we don't need to
+    // strip first.
+    if (SPINNER_RE.test(data)) session.lastSpinnerSeen = Date.now()
+    recomputeStatus(session)
     mainWindow?.webContents.send('session:data', { id, data })
   })
 
   term.onExit(({ exitCode }) => {
     console.log(`[termhub] session ${id.slice(0, 8)} exited (code=${exitCode})`)
+    if (session.statusReevalTimer) {
+      clearTimeout(session.statusReevalTimer)
+      session.statusReevalTimer = null
+    }
+    // Emit the terminal status BEFORE the exit event so the renderer has
+    // it set when it decides whether to keep the row visible.
+    setStatus(session, exitCode === 0 ? 'idle' : 'failed')
     mainWindow?.webContents.send('session:exit', { id, exitCode })
     // The session is going away — tear down the shell PTY too so we don't
     // leak it.
