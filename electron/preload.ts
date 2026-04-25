@@ -97,6 +97,9 @@ const api = {
 
   openSkill: (path: string): Promise<void> =>
     ipcRenderer.invoke('skills:open', path),
+
+  renameSession: (id: string, name: string): Promise<void> =>
+    ipcRenderer.invoke('session:rename', { id, name }),
 }
 
 contextBridge.exposeInMainWorld('termhub', api)

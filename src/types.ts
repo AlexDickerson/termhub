@@ -65,6 +65,7 @@ export type TermhubApi = {
   openAgent: (path: string) => Promise<void>
   listSkills: () => Promise<SkillDef[]>
   openSkill: (path: string) => Promise<void>
+  renameSession: (id: string, name: string) => Promise<void>
 }
 
 declare global {

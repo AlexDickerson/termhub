@@ -693,6 +693,13 @@ app.whenReady().then(async () => {
     })),
   )
 
+  ipcMain.handle('session:rename', (_event, payload: { id: string; name: string }) => {
+    const s = sessions.get(payload.id)
+    if (!s) throw new Error(`Session not found: ${payload.id}`)
+    s.name = payload.name.trim() || undefined
+    persistSessions()
+  })
+
   ipcMain.handle('agents:list', () => listAgents())
 
   ipcMain.handle('agents:open', async (_event, filePath: string) => {
