@@ -387,7 +387,8 @@ export function createSessionInternal(opts: {
       })
       console.info(
         `[termhub:session] ${id.slice(0, 8)} codex spawn — cwd=${opts.cwd}` +
-          (opts.model ? ` model=${opts.model}` : ''),
+          (opts.model ? ` model=${opts.model}` : '') +
+          ` cmd="${finalCommand}"`,
       )
     } else if (isClaudeCommand(opts.command)) {
       finalCommand = buildClaudeCommand({
