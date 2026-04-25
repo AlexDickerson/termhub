@@ -1,6 +1,7 @@
 import { useEffect, useRef, type MutableRefObject } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import type { Session } from './types'
 import type { TerminalEntry } from './App'
 type Props = {
@@ -74,6 +75,11 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
       const fit = new FitAddon()
       term.loadAddon(fit)
 
+      const linksAddon = new WebLinksAddon((_event, uri) => {
+        window.termhub.openExternal(uri)
+      })
+      term.loadAddon(linksAddon)
+
       // Single handler — xterm only keeps the last registered handler, so
       // all key interception must live in one call to attachCustomKeyEventHandler.
       term.attachCustomKeyEventHandler((e) => {
@@ -140,7 +146,7 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
       // an onResize (no-op when proposed dims match the constructor cols/rows).
       window.termhub.resize(session.id, term.cols, term.rows)
 
-      termsRef.current.set(session.id, { term, fit })
+      termsRef.current.set(session.id, { term, fit, linksAddon })
 
       const queue = pendingDataRef.current.get(session.id)
       if (queue && queue.length > 0) {
@@ -160,6 +166,7 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
     return () => {
       const entry = termsRef.current.get(session.id)
       if (entry) {
+        entry.linksAddon?.dispose()
         entry.term.dispose()
         termsRef.current.delete(session.id)
       }

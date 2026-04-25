@@ -156,6 +156,10 @@ const api = {
     ipcRenderer.on('window:maximizeChange', handler)
     return () => { ipcRenderer.off('window:maximizeChange', handler) }
   },
+
+  openExternal: (url: string): void => {
+    ipcRenderer.send('open-external', url)
+  },
 }
 
 contextBridge.exposeInMainWorld('termhub', api)

@@ -94,6 +94,7 @@ export type TermhubApi = {
   closeWindow: () => void
   isMaximized: () => Promise<boolean>
   onMaximizeChange: (cb: (maximized: boolean) => void) => () => void
+  openExternal: (url: string) => void
 }
 
 declare global {
