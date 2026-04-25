@@ -26,19 +26,21 @@ export type SkillDef = {
   description?: string
 }
 
+export type StartupSession = {
+  cwd: string
+  command?: string
+  prompt?: string
+  agent?: string
+  model?: string
+  dangerouslySkipPermissions?: boolean
+  allowDangerouslySkipPermissions?: boolean
+  permissionMode?: string
+  name?: string
+}
+
 export type Config = {
   mcpPort: number
-  startupSessions: Array<{
-    cwd: string
-    command?: string
-    prompt?: string
-    agent?: string
-    model?: string
-    dangerouslySkipPermissions?: boolean
-    allowDangerouslySkipPermissions?: boolean
-    permissionMode?: string
-    name?: string
-  }>
+  startupSessions: StartupSession[]
 }
 
 export type TermhubApi = {

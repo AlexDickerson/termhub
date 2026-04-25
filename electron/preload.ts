@@ -1,8 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type {
+  AgentDef,
+  Config,
+  SessionStatus,
+  SkillDef,
+} from '../src/types'
 
 type DataPayload = { id: string; data: string }
 type ExitPayload = { id: string; exitCode: number }
-type SessionStatus = 'working' | 'awaiting' | 'idle' | 'failed'
 type StatusPayload = { id: string; status: SessionStatus }
 type AddedPayload = {
   id: string
@@ -13,7 +18,6 @@ type AddedPayload = {
   repoRoot?: string
   repoLabel?: string
 }
-type AgentDef = { name: string; path: string; description?: string }
 
 const api = {
   createSession: (
@@ -47,8 +51,7 @@ const api = {
 
   home: (): Promise<string> => ipcRenderer.invoke('app:home'),
 
-  getConfig: (): Promise<{ startupSessions: Array<{ cwd: string }> }> =>
-    ipcRenderer.invoke('config:get'),
+  getConfig: (): Promise<Config> => ipcRenderer.invoke('config:get'),
 
   configPath: (): Promise<string> => ipcRenderer.invoke('config:path'),
 
@@ -136,7 +139,7 @@ const api = {
   openAgent: (path: string): Promise<void> =>
     ipcRenderer.invoke('agents:open', path),
 
-  listSkills: (): Promise<AgentDef[]> => ipcRenderer.invoke('skills:list'),
+  listSkills: (): Promise<SkillDef[]> => ipcRenderer.invoke('skills:list'),
 
   openSkill: (path: string): Promise<void> =>
     ipcRenderer.invoke('skills:open', path),

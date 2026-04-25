@@ -7,7 +7,13 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { startMcpServer, type McpHandle } from './mcp'
 import { isAllowedExternalUrl } from './links'
-import { watchSessionStatus, type WatcherHandle, type SessionStatus } from './status-watcher'
+import { watchSessionStatus, type WatcherHandle } from './status-watcher'
+import type {
+  AgentDef,
+  Config,
+  SessionStatus,
+  SkillDef,
+} from '../src/types'
 
 // Isolate dev builds so their sessions, config, and MCP port don't bleed into
 // the production instance running alongside. Must be called before the first
@@ -140,23 +146,6 @@ function findSessionByIdOrPrefix(idOrPrefix: string): FindSessionResult {
   }
 }
 
-type StartupSession = {
-  cwd: string
-  command?: string
-  prompt?: string
-  agent?: string
-  model?: string
-  dangerouslySkipPermissions?: boolean
-  allowDangerouslySkipPermissions?: boolean
-  permissionMode?: string
-  name?: string
-}
-
-type Config = {
-  mcpPort: number
-  startupSessions: StartupSession[]
-}
-
 type PersistedSession = {
   id: string
   cwd: string
@@ -240,8 +229,6 @@ function getSkillsDir(): string {
   return path.join(os.homedir(), '.claude', 'skills')
 }
 
-type AgentDef = { name: string; path: string; description?: string }
-
 function listAgents(): AgentDef[] {
   const dir = getAgentsDir()
   let entries: string[]
@@ -283,8 +270,6 @@ function parseAgentDescription(filePath: string): string | undefined {
     return undefined
   }
 }
-
-type SkillDef = { name: string; path: string; description?: string }
 
 function listSkills(): SkillDef[] {
   const dir = getSkillsDir()
