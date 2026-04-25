@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MutableRefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { Session } from './types'
@@ -13,6 +13,36 @@ type Props = {
 
 export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [inputValue, setInputValue] = useState('')
+
+  // Auto-resize the textarea height to fit its content, up to the CSS max-height
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [inputValue])
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key !== 'Enter') return
+      if (e.shiftKey) {
+        // Shift+Enter: insert a newline — let default textarea behaviour handle it
+        return
+      }
+      // Plain Enter: submit input to the PTY
+      e.preventDefault()
+      const text = inputValue
+      if (text === '') return
+      window.termhub.sendInput(session.id, text + '\n')
+      setInputValue('')
+      // Return focus to the terminal after submitting
+      const entry = termsRef.current.get(session.id)
+      if (entry) entry.term.focus()
+    },
+    [inputValue, session.id, termsRef],
+  )
 
   // Lazy-init: only create the xterm instance when the session first becomes
   // visible. xterm's renderer needs a non-zero-size container at open() time
@@ -152,9 +182,21 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
 
   return (
     <div
-      ref={containerRef}
-      className="terminal-container"
-      style={{ display: isActive ? 'block' : 'none' }}
-    />
+      className="terminal-pane"
+      style={{ display: isActive ? 'flex' : 'none' }}
+    >
+      <div ref={containerRef} className="terminal-container" />
+      <div className="input-bar">
+        <textarea
+          ref={textareaRef}
+          className="input-bar-textarea"
+          value={inputValue}
+          rows={1}
+          placeholder="Type input… Enter to send, Shift+Enter for new line"
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+      </div>
+    </div>
   )
 }
