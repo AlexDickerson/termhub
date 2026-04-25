@@ -88,6 +88,12 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
       // and substitutes a custom byte sequence that Claude Code does not
       // recognise, causing it to submit instead of inserting a newline.
       term.attachCustomKeyEventHandler((e) => {
+        // Diagnostic: log every Shift+Enter keydown so we can see (a) whether
+        // the handler fires and (b) what bytes xterm emits for it via onData.
+        if (e.type === 'keydown' && e.shiftKey && e.key === 'Enter') {
+          console.log('[termhub] Shift+Enter keydown — ctrl:', e.ctrlKey, '— letting xterm encode')
+        }
+
         // Ctrl+C / Ctrl+V: clipboard copy and paste.
         if (e.type === 'keydown' && e.ctrlKey) {
           const isC = e.code === 'KeyC'
@@ -128,6 +134,10 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
       // cursor-positioning corruption (broken tab completion, TUIs that
       // overwrite themselves instead of scrolling).
       term.onData((data) => {
+        // Diagnostic: log bytes as hex around the time of a Shift+Enter so we
+        // can see exactly what xterm is sending to the PTY.
+        const hex = Array.from(data).map(c => c.codePointAt(0)!.toString(16).padStart(2, '0')).join(' ')
+        console.log(`[termhub] onData → ${JSON.stringify(data)}  [${hex}]`)
         window.termhub.sendInput(session.id, data)
       })
       term.onResize(({ cols, rows }) => {
