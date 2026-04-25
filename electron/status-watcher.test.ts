@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mapJsonlStatus, parseLatestStatus, encodeProjectPath } from './status-watcher'
+import { mapJsonlStatus, parseSessionStatus } from './status-watcher'
 
 describe('mapJsonlStatus', () => {
   it('maps idle to idle', () => {
@@ -22,76 +22,49 @@ describe('mapJsonlStatus', () => {
   })
 })
 
-describe('parseLatestStatus', () => {
-  it('returns undefined for empty chunk', () => {
-    expect(parseLatestStatus('')).toBeUndefined()
+describe('parseSessionStatus', () => {
+  it('returns undefined for empty string', () => {
+    expect(parseSessionStatus('')).toBeUndefined()
+  })
+
+  it('returns undefined for malformed JSON', () => {
+    expect(parseSessionStatus('{ broken')).toBeUndefined()
+    expect(parseSessionStatus('not json at all')).toBeUndefined()
   })
 
   it('returns undefined when no status field present', () => {
-    const chunk = JSON.stringify({ type: 'user', message: 'hello' }) + '\n'
-    expect(parseLatestStatus(chunk)).toBeUndefined()
+    const content = JSON.stringify({ pid: 12345, cwd: 'D:\\', startedAt: 1234 })
+    expect(parseSessionStatus(content)).toBeUndefined()
   })
 
-  it('returns status from a single record', () => {
-    const line = JSON.stringify({ type: 'system', status: 'idle' })
-    expect(parseLatestStatus(line)).toBe('idle')
+  it('returns undefined when status is not a string', () => {
+    expect(parseSessionStatus(JSON.stringify({ status: 42 }))).toBeUndefined()
+    expect(parseSessionStatus(JSON.stringify({ status: null }))).toBeUndefined()
+    expect(parseSessionStatus(JSON.stringify({ status: true }))).toBeUndefined()
   })
 
-  it('returns the last status when multiple records have status', () => {
-    const chunk = [
-      JSON.stringify({ type: 'system', status: 'busy' }),
-      JSON.stringify({ type: 'system', status: 'idle' }),
-    ].join('\n')
-    expect(parseLatestStatus(chunk)).toBe('idle')
+  it('returns undefined when status is an empty string', () => {
+    expect(parseSessionStatus(JSON.stringify({ status: '' }))).toBeUndefined()
   })
 
-  it('skips records without a status field', () => {
-    const chunk = [
-      JSON.stringify({ type: 'user', message: 'hi' }),
-      JSON.stringify({ type: 'system', status: 'waiting' }),
-      JSON.stringify({ type: 'assistant', message: 'response' }),
-    ].join('\n')
-    expect(parseLatestStatus(chunk)).toBe('waiting')
+  it('returns status from a valid session record', () => {
+    const content = JSON.stringify({
+      pid: 28236,
+      sessionId: '70ebba48-4fe8-4bc4-92e1-c975ab5ed2e6',
+      cwd: 'D:\\',
+      startedAt: 1777131167148,
+      status: 'waiting',
+      updatedAt: 1777131286192,
+      waitingFor: 'approve Bash',
+    })
+    expect(parseSessionStatus(content)).toBe('waiting')
   })
 
-  it('ignores malformed JSON lines', () => {
-    const chunk = [
-      'this is not json',
-      JSON.stringify({ type: 'system', status: 'busy' }),
-      '{ broken',
-    ].join('\n')
-    expect(parseLatestStatus(chunk)).toBe('busy')
+  it('returns idle status', () => {
+    expect(parseSessionStatus(JSON.stringify({ status: 'idle' }))).toBe('idle')
   })
 
-  it('ignores empty lines', () => {
-    const chunk = '\n\n' + JSON.stringify({ status: 'idle' }) + '\n\n'
-    expect(parseLatestStatus(chunk)).toBe('idle')
-  })
-
-  it('ignores records where status is not a string', () => {
-    const chunk = JSON.stringify({ status: 42 }) + '\n' + JSON.stringify({ status: 'busy' })
-    expect(parseLatestStatus(chunk)).toBe('busy')
-  })
-})
-
-describe('encodeProjectPath', () => {
-  it('encodes a Windows absolute path', () => {
-    // e.g. "E:\Apps\termhub" → "E--Apps-termhub"
-    expect(encodeProjectPath('E:\\Apps\\termhub')).toBe('E--Apps-termhub')
-  })
-
-  it('encodes a forward-slash path', () => {
-    expect(encodeProjectPath('E:/Apps/termhub')).toBe('E--Apps-termhub')
-  })
-
-  it('handles a simple drive root', () => {
-    // E:\ → each special char becomes a dash → 'E--', no trailing strip
-    expect(encodeProjectPath('E:\\')).toBe('E--')
-  })
-
-  it('encodes worktree paths correctly', () => {
-    const input = 'E:\\Apps\\termhub\\.claude\\worktrees\\jsonl-session-status'
-    const result = encodeProjectPath(input)
-    expect(result).toBe('E--Apps-termhub--claude-worktrees-jsonl-session-status')
+  it('returns busy status', () => {
+    expect(parseSessionStatus(JSON.stringify({ status: 'busy' }))).toBe('busy')
   })
 })

@@ -5,11 +5,11 @@ import * as os from 'node:os'
 // Advisory status type mirroring src/types.ts SessionStatus.
 export type SessionStatus = 'working' | 'awaiting' | 'idle' | 'failed'
 
-// Map Claude Code's JSONL `status` field values to termhub's SessionStatus.
+// Map Claude Code's session `status` field values to termhub's SessionStatus.
 // Values from Claude Code:
 //   idle    → session at the input prompt, ready for user
 //   busy    → Claude is generating / running tools
-//   waiting → Claude has paused to ask the user something
+//   waiting → Claude has paused to ask the user something (permission prompt etc.)
 // Unknown/missing values fall back to 'working' (optimistic — assume busy
 // rather than showing a misleading idle state).
 export function mapJsonlStatus(raw: string): SessionStatus {
@@ -21,116 +21,104 @@ export function mapJsonlStatus(raw: string): SessionStatus {
   }
 }
 
-// Pull the latest `status` value from a JSONL chunk (may contain multiple
-// lines). Returns undefined if no `status` field is found in any record.
-export function parseLatestStatus(chunk: string): string | undefined {
-  const lines = chunk.split('\n')
-  let latest: string | undefined
-  for (const line of lines) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    try {
-      const rec = JSON.parse(trimmed) as Record<string, unknown>
-      if (typeof rec.status === 'string' && rec.status.length > 0) {
-        latest = rec.status
-      }
-    } catch {
-      // Malformed JSON line — skip
-    }
-  }
-  return latest
-}
-
-// Encode a filesystem path the same way Claude Code does when building the
-// ~/.claude/projects/<encoded-cwd>/ directory name. Each character that is
-// a path separator (\, /), colon (:), or dot (.) is replaced with a dash.
-// Consecutive dashes are NOT collapsed — "E:\Apps" → "E--Apps" because the
-// colon and backslash each independently become a dash.
-export function encodeProjectPath(cwdArg: string): string {
-  return cwdArg.replace(/[\\/:\.]/g, '-')
-}
-
-// Locate the JSONL file for a session by searching
-// ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl.
-// Returns the path if the file exists, or null if it can't be found.
-export function resolveJsonlPath(cwd: string, sessionId: string): string | null {
-  const encoded = encodeProjectPath(cwd)
-  const candidate = path.join(
-    os.homedir(),
-    '.claude',
-    'projects',
-    encoded,
-    `${sessionId}.jsonl`,
-  )
+// Parse the `status` field from a Claude Code session file.
+// The file is a single JSON object written/overwritten in-place by Claude Code
+// at ~/.claude/sessions/<pid>.json. Returns undefined if the content is
+// unparseable or has no status field.
+export function parseSessionStatus(content: string): string | undefined {
   try {
-    fs.accessSync(candidate, fs.constants.R_OK)
-    return candidate
+    const rec = JSON.parse(content) as Record<string, unknown>
+    if (typeof rec.status === 'string' && rec.status.length > 0) return rec.status
+  } catch {
+    // malformed JSON — ignore
+  }
+  return undefined
+}
+
+const SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions')
+
+// Scan ~/.claude/sessions/ for a .json file whose `cwd` matches the given cwd
+// and whose `startedAt` is within the expected window around spawnedAt.
+// Returns the full file path, or null if no match is found.
+export function findSessionFile(cwd: string, spawnedAt: number): string | null {
+  let files: string[]
+  try {
+    files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'))
   } catch {
     return null
   }
+
+  // Normalise + lowercase for case-insensitive Windows path comparison.
+  const normCwd = path.normalize(cwd).toLowerCase()
+
+  // Allow the session file to have been created up to 5 min before our spawn
+  // (clock skew / race) or any time after.
+  const LOOKBACK_MS = 5 * 60 * 1000
+
+  let best: { filePath: string; startedAt: number } | null = null
+
+  for (const file of files) {
+    const filePath = path.join(SESSIONS_DIR, file)
+    try {
+      const content = fs.readFileSync(filePath, 'utf8')
+      const rec = JSON.parse(content) as Record<string, unknown>
+      if (typeof rec.cwd !== 'string') continue
+      if (path.normalize(rec.cwd).toLowerCase() !== normCwd) continue
+      if (typeof rec.startedAt !== 'number') continue
+      if (rec.startedAt < spawnedAt - LOOKBACK_MS) continue
+      if (!best || rec.startedAt > best.startedAt) {
+        best = { filePath, startedAt: rec.startedAt }
+      }
+    } catch {
+      // unparseable or gone — skip
+    }
+  }
+
+  return best?.filePath ?? null
 }
 
 export type WatcherHandle = {
   stop: () => void
 }
 
-// Watch a Claude Code JSONL file for status changes. Polls via
-// fs.watchFile (more reliable than fs.watch on Windows). On each file
-// change, reads new bytes from the last known offset, parses any `status`
-// records, maps the value, and calls onStatus if it changed.
+// Watch the status of a Claude Code session by polling ~/.claude/sessions/
+// for a JSON file matching the session's cwd.
 //
-// The file may not exist yet when this is called (Claude Code creates it
-// shortly after the session starts). The watcher will begin emitting once
-// the file appears.
+// Claude Code writes ~/.claude/sessions/<pid>.json — a single JSON object
+// rewritten in-place on every status change. The file is named by Claude's
+// own PID (not termhub's session ID), so we discover it by cwd match.
 //
-// If the file shrinks (truncated / session reset), the offset is reset to 0
-// so the whole file is re-read.
+// Before the file appears (Claude Code creates it shortly after startup),
+// status stays at 'working' — we optimistically assume busy until the file
+// says otherwise.
 //
 // Returns a handle with a stop() method to tear down the watcher.
-export function watchJsonlStatus(
-  jsonlPath: string,
+export function watchSessionStatus(
+  cwd: string,
   onStatus: (status: SessionStatus) => void,
 ): WatcherHandle {
-  let offset = 0
+  const spawnedAt = Date.now()
+  let stopped = false
+  let watchedPath: string | null = null
   let lastEmitted: SessionStatus | undefined
 
-  function readNewChunk() {
-    let stat: fs.Stats
-    try {
-      stat = fs.statSync(jsonlPath)
-    } catch (err) {
-      // File gone or not yet created — ignore until next poll tick
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-        console.error('[termhub:status] unexpected stat error on', jsonlPath, err)
+  function poll() {
+    if (stopped) return
+
+    // Discover the session file if we haven't yet.
+    if (!watchedPath) {
+      watchedPath = findSessionFile(cwd, spawnedAt)
+      if (watchedPath) {
+        console.log('[termhub:status] found session file for', path.basename(cwd), 'at', watchedPath)
       }
-      return
     }
 
-    // File truncated / session resumed — reset offset to read from the top
-    if (stat.size < offset) {
-      console.log('[termhub:status] JSONL file truncated, resetting offset:', path.basename(jsonlPath))
-      offset = 0
-    }
+    if (!watchedPath) return
 
-    if (stat.size === offset) {
-      return // nothing new
-    }
-
-    let fd: number
+    // Read the current status from the file (whole file — it's a single JSON object).
     try {
-      fd = fs.openSync(jsonlPath, 'r')
-    } catch (err) {
-      console.error('[termhub:status] failed to open JSONL file', jsonlPath, err)
-      return
-    }
-
-    try {
-      const newBytes = stat.size - offset
-      const buf = Buffer.alloc(newBytes)
-      const bytesRead = fs.readSync(fd, buf, 0, newBytes, offset)
-      offset += bytesRead
-      const chunk = buf.slice(0, bytesRead).toString('utf8')
-      const raw = parseLatestStatus(chunk)
+      const content = fs.readFileSync(watchedPath, 'utf8')
+      const raw = parseSessionStatus(content)
       if (raw === undefined) return
       const next = mapJsonlStatus(raw)
       if (next !== lastEmitted) {
@@ -138,52 +126,23 @@ export function watchJsonlStatus(
         onStatus(next)
       }
     } catch (err) {
-      console.error('[termhub:status] failed to read JSONL file', jsonlPath, err)
-    } finally {
-      try {
-        fs.closeSync(fd)
-      } catch {
-        // ignore
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.error('[termhub:status] failed to read session file', watchedPath, err)
       }
+      // File gone — reset so we re-scan next tick
+      watchedPath = null
     }
   }
 
-  // Poll every 500 ms. fs.watchFile is available everywhere and avoids the
-  // unreliable fs.watch kernel events on Windows networked / NTFS paths.
-  fs.watchFile(jsonlPath, { interval: 500, persistent: false }, readNewChunk)
-
-  // Also do an immediate read in case the file already has content.
-  readNewChunk()
+  // Poll every 500 ms. setInterval + readFileSync is straightforward and avoids
+  // the unreliable fs.watch kernel events on Windows NTFS paths.
+  const timer = setInterval(poll, 500)
+  poll() // immediate first read
 
   return {
     stop() {
-      fs.unwatchFile(jsonlPath)
+      stopped = true
+      clearInterval(timer)
     },
   }
-}
-
-// Start watching the JSONL file for a session, discovering the path from
-// the session's cwd and id. The path search is repeated on each poll tick
-// until the file is found, so callers don't need to wait for it to appear.
-//
-// When the file doesn't exist yet, status stays at 'working' (the session
-// just started — we optimistically assume Claude is busy until JSONL says
-// otherwise).
-export function watchSessionStatus(
-  cwd: string,
-  sessionId: string,
-  onStatus: (status: SessionStatus) => void,
-): WatcherHandle {
-  const encoded = encodeProjectPath(cwd)
-  const jsonlPath = path.join(
-    os.homedir(),
-    '.claude',
-    'projects',
-    encoded,
-    `${sessionId}.jsonl`,
-  )
-
-  console.log('[termhub:status] watching JSONL for session', sessionId.slice(0, 8), 'at', jsonlPath)
-
-  return watchJsonlStatus(jsonlPath, onStatus)
 }

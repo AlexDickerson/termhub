@@ -559,7 +559,7 @@ function createSessionInternal(opts: {
   // file is created by Claude Code shortly after startup; the watcher polls
   // and will begin emitting once the file appears.
   if (opts.command && isClaudeCommand(opts.command)) {
-    session.jsonlWatcher = watchSessionStatus(opts.cwd, id, (next) => {
+    session.jsonlWatcher = watchSessionStatus(opts.cwd, (next) => {
       // 'failed' is only set on PTY exit — never override it from JSONL.
       if (session.status !== 'failed') {
         setStatus(session, next)
