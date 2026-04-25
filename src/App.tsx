@@ -3,6 +3,7 @@ import type { Terminal } from '@xterm/xterm'
 import type { FitAddon } from '@xterm/addon-fit'
 import { Sidebar } from './Sidebar'
 import { TerminalView } from './TerminalView'
+import { BottomTerminal } from './BottomTerminal'
 import { RightPanel } from './RightPanel'
 import type { Session, SessionStatus } from './types'
 
@@ -12,8 +13,13 @@ export default function App() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [statuses, setStatuses] = useState<Record<string, SessionStatus>>({})
   const [activeId, setActiveId] = useState<string | null>(null)
+  // Primary (claude) PTY xterm instances, keyed by session id.
   const termsRef = useRef(new Map<string, TerminalEntry>())
   const pendingDataRef = useRef(new Map<string, string[]>())
+  // Parallel state for the docked bottom shell terminals. Same map shape,
+  // keyed by the same session id, but wired to the shell PTY channel.
+  const shellTermsRef = useRef(new Map<string, TerminalEntry>())
+  const shellPendingDataRef = useRef(new Map<string, string[]>())
 
   useEffect(() => {
     const offData = window.termhub.onData((id, data) => {
@@ -24,6 +30,16 @@ export default function App() {
         const queue = pendingDataRef.current.get(id) ?? []
         queue.push(data)
         pendingDataRef.current.set(id, queue)
+      }
+    })
+    const offShellData = window.termhub.onShellData((id, data) => {
+      const entry = shellTermsRef.current.get(id)
+      if (entry) {
+        entry.term.write(data)
+      } else {
+        const queue = shellPendingDataRef.current.get(id) ?? []
+        queue.push(data)
+        shellPendingDataRef.current.set(id, queue)
       }
     })
     const offExit = window.termhub.onExit((id, exitCode) => {
@@ -38,6 +54,17 @@ export default function App() {
       setStatuses((prev) =>
         prev[id] === status ? prev : { ...prev, [id]: status },
       )
+    })
+    // Shell PTY exiting independently (user typed `exit`) doesn't tear the
+    // session down — only the primary exit does. We still drop the xterm
+    // instance so a future re-init could replace it, but v1 doesn't respawn.
+    const offShellExit = window.termhub.onShellExit((id) => {
+      const entry = shellTermsRef.current.get(id)
+      if (entry) {
+        entry.term.dispose()
+        shellTermsRef.current.delete(id)
+      }
+      shellPendingDataRef.current.delete(id)
     })
     const offAdded = window.termhub.onSessionAdded(
       (id, cwd, autoActivate, command, name) => {
@@ -68,8 +95,10 @@ export default function App() {
 
     return () => {
       offData()
+      offShellData()
       offExit()
       offStatus()
+      offShellExit()
       offAdded()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -81,6 +110,12 @@ export default function App() {
       entry.term.dispose()
       termsRef.current.delete(id)
     }
+    const shellEntry = shellTermsRef.current.get(id)
+    if (shellEntry) {
+      shellEntry.term.dispose()
+      shellTermsRef.current.delete(id)
+    }
+    shellPendingDataRef.current.delete(id)
     setSessions((prev) => prev.filter((s) => s.id !== id))
     setStatuses((prev) => {
       if (!(id in prev)) return prev
@@ -104,6 +139,17 @@ export default function App() {
     [removeSession],
   )
 
+  const renameSession = useCallback(async (id: string, name: string) => {
+    try {
+      await window.termhub.renameSession(id, name)
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, name: name.trim() || undefined } : s)),
+      )
+    } catch (err) {
+      console.error('[termhub] renameSession failed:', err)
+    }
+  }, [])
+
   const newSession = useCallback(async () => {
     try {
       const cwd = await window.termhub.pickFolder()
@@ -117,34 +163,52 @@ export default function App() {
     }
   }, [])
 
-  // Refit the active terminal when window resizes
+  // Refit both terminals for the active session when the window resizes.
   useEffect(() => {
     const onResize = () => {
       if (!activeId) return
       const entry = termsRef.current.get(activeId)
-      if (!entry) return
-      try {
-        entry.fit.fit()
-      } catch {
-        // container may not be mounted yet
+      if (entry) {
+        try {
+          entry.fit.fit()
+        } catch {
+          // container may not be mounted yet
+        }
+      }
+      const shellEntry = shellTermsRef.current.get(activeId)
+      if (shellEntry) {
+        try {
+          shellEntry.fit.fit()
+        } catch {
+          // container may not be mounted yet
+        }
       }
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [activeId])
 
-  // Refit when active session changes (its container just became visible)
+  // Refit both when active session changes (their containers just became visible)
   useEffect(() => {
     if (!activeId) return
     const id = activeId
     const raf = requestAnimationFrame(() => {
       const entry = termsRef.current.get(id)
-      if (!entry) return
-      try {
-        entry.fit.fit()
-        entry.term.focus()
-      } catch {
-        // ignore — container not ready
+      if (entry) {
+        try {
+          entry.fit.fit()
+          entry.term.focus()
+        } catch {
+          // ignore — container not ready
+        }
+      }
+      const shellEntry = shellTermsRef.current.get(id)
+      if (shellEntry) {
+        try {
+          shellEntry.fit.fit()
+        } catch {
+          // ignore
+        }
       }
     })
     return () => cancelAnimationFrame(raf)
@@ -165,6 +229,7 @@ export default function App() {
         onNew={newSession}
         onSelect={setActiveId}
         onClose={closeSession}
+        onRename={renameSession}
       />
       <main className="main">
         {sessions.length === 0 ? (
@@ -173,15 +238,31 @@ export default function App() {
             <button onClick={newSession}>+ New Session</button>
           </div>
         ) : (
-          sessions.map((s) => (
-            <TerminalView
-              key={s.id}
-              session={s}
-              isActive={s.id === activeId}
-              termsRef={termsRef}
-              pendingDataRef={pendingDataRef}
-            />
-          ))
+          <>
+            <div className="main-top">
+              {sessions.map((s) => (
+                <TerminalView
+                  key={s.id}
+                  session={s}
+                  isActive={s.id === activeId}
+                  termsRef={termsRef}
+                  pendingDataRef={pendingDataRef}
+                />
+              ))}
+            </div>
+            <div className="main-divider" />
+            <div className="main-bottom">
+              {sessions.map((s) => (
+                <BottomTerminal
+                  key={s.id}
+                  session={s}
+                  isActive={s.id === activeId}
+                  termsRef={shellTermsRef}
+                  pendingDataRef={shellPendingDataRef}
+                />
+              ))}
+            </div>
+          </>
         )}
       </main>
       <RightPanel activeSession={activeSession} />

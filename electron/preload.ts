@@ -33,6 +33,14 @@ const api = {
     ipcRenderer.send('session:close', { id })
   },
 
+  sendShellInput: (id: string, data: string): void => {
+    ipcRenderer.send('session:shell:input', { id, data })
+  },
+
+  resizeShell: (id: string, cols: number, rows: number): void => {
+    ipcRenderer.send('session:shell:resize', { id, cols, rows })
+  },
+
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('dialog:pickFolder'),
 
   home: (): Promise<string> => ipcRenderer.invoke('app:home'),
@@ -76,6 +84,24 @@ const api = {
     }
   },
 
+  onShellData: (cb: (id: string, data: string) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, p: DataPayload) =>
+      cb(p.id, p.data)
+    ipcRenderer.on('session:shell:data', handler)
+    return () => {
+      ipcRenderer.off('session:shell:data', handler)
+    }
+  },
+
+  onShellExit: (cb: (id: string, exitCode: number) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, p: ExitPayload) =>
+      cb(p.id, p.exitCode)
+    ipcRenderer.on('session:shell:exit', handler)
+    return () => {
+      ipcRenderer.off('session:shell:exit', handler)
+    }
+  },
+
   onSessionAdded: (
     cb: (
       id: string,
@@ -110,6 +136,9 @@ const api = {
 
   openSkill: (path: string): Promise<void> =>
     ipcRenderer.invoke('skills:open', path),
+
+  renameSession: (id: string, name: string): Promise<void> =>
+    ipcRenderer.invoke('session:rename', { id, name }),
 }
 
 contextBridge.exposeInMainWorld('termhub', api)

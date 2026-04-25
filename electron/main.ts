@@ -18,6 +18,8 @@ type Session = {
   model?: string
   permissionMode?: string
   dangerouslySkipPermissions?: boolean
+  // Primary PTY — runs claude (or whatever command the caller asked for).
+  // This is what the MCP tools target.
   term: pty.IPty
   outputBuffer: string
   status: SessionStatus
@@ -27,6 +29,10 @@ type Session = {
   // flap to idle between spinner ticks.
   lastSpinnerSeen: number
   statusReevalTimer: NodeJS.Timeout | null
+  // Secondary "shell" PTY — a plain interactive shell rooted at `cwd`,
+  // docked at the bottom of the UI for the user's own manual work. Not
+  // exposed via MCP, not persisted. Lifetime is bound to the session.
+  shellTerm: pty.IPty
 }
 
 const MAX_OUTPUT_BUFFER_BYTES = 256 * 1024
@@ -485,6 +491,30 @@ function createSessionInternal(opts: {
   }
   console.log(`[termhub] pty.spawn returned (pid=${term.pid})`)
 
+  // Secondary shell PTY — same executable + cwd as the primary, but holds a
+  // plain interactive prompt for the user's own work. We mirror the primary's
+  // shell choice so the bottom pane matches what the user sees by default.
+  let shellTerm: pty.IPty
+  try {
+    shellTerm = pty.spawn(shell, [], {
+      name: 'xterm-color',
+      cols: 80,
+      rows: 10,
+      cwd: opts.cwd,
+      env: cleanEnv(),
+    })
+  } catch (err) {
+    console.error('[termhub] pty.spawn (shell) failed:', err)
+    // Roll back the primary so we don't leak a dangling PTY.
+    try {
+      term.kill()
+    } catch {
+      // ignore
+    }
+    throw err
+  }
+  console.log(`[termhub] shell pty.spawn returned (pid=${shellTerm.pid})`)
+
   const session: Session = {
     id,
     cwd: opts.cwd,
@@ -498,6 +528,7 @@ function createSessionInternal(opts: {
     status: 'idle',
     lastSpinnerSeen: 0,
     statusReevalTimer: null,
+    shellTerm,
   }
   sessions.set(id, session)
   persistSessions()
@@ -527,8 +558,30 @@ function createSessionInternal(opts: {
     // it set when it decides whether to keep the row visible.
     setStatus(session, exitCode === 0 ? 'idle' : 'failed')
     mainWindow?.webContents.send('session:exit', { id, exitCode })
+    // The session is going away — tear down the shell PTY too so we don't
+    // leak it.
+    try {
+      shellTerm.kill()
+    } catch {
+      // already dead
+    }
     sessions.delete(id)
     persistSessions()
+  })
+
+  // Shell PTY data/exit live on a parallel IPC channel. We deliberately do
+  // NOT mirror into outputBuffer (that's the MCP read_output surface for
+  // the primary) and we do NOT destroy the session when the shell exits —
+  // the user can close the primary to tear the whole session down.
+  shellTerm.onData((data) => {
+    mainWindow?.webContents.send('session:shell:data', { id, data })
+  })
+
+  shellTerm.onExit(({ exitCode }) => {
+    console.log(
+      `[termhub] session ${id.slice(0, 8)} shell exited (code=${exitCode})`,
+    )
+    mainWindow?.webContents.send('session:shell:exit', { id, exitCode })
   })
 
   if (opts.command && opts.command.trim().length > 0) {
@@ -609,6 +662,11 @@ function killAllSessions() {
   for (const s of sessions.values()) {
     try {
       s.term.kill()
+    } catch {
+      // already dead
+    }
+    try {
+      s.shellTerm.kill()
     } catch {
       // already dead
     }
@@ -776,9 +834,37 @@ app.whenReady().then(async () => {
     } catch {
       // already dead
     }
+    try {
+      s.shellTerm.kill()
+    } catch {
+      // already dead
+    }
     sessions.delete(payload.id)
     persistSessions()
   })
+
+  ipcMain.on(
+    'session:shell:input',
+    (_event, payload: { id: string; data: string }) => {
+      sessions.get(payload.id)?.shellTerm.write(payload.data)
+    },
+  )
+
+  ipcMain.on(
+    'session:shell:resize',
+    (_event, payload: { id: string; cols: number; rows: number }) => {
+      const s = sessions.get(payload.id)
+      if (!s) return
+      if (!Number.isFinite(payload.cols) || !Number.isFinite(payload.rows)) return
+      const cols = Math.max(1, Math.floor(payload.cols))
+      const rows = Math.max(1, Math.floor(payload.rows))
+      try {
+        s.shellTerm.resize(cols, rows)
+      } catch {
+        // pty may have exited between resize requests
+      }
+    },
+  )
 
   ipcMain.handle('sessions:list', () =>
     Array.from(sessions.values()).map((s) => ({
@@ -788,6 +874,13 @@ app.whenReady().then(async () => {
       name: s.name,
     })),
   )
+
+  ipcMain.handle('session:rename', (_event, payload: { id: string; name: string }) => {
+    const s = sessions.get(payload.id)
+    if (!s) throw new Error(`Session not found: ${payload.id}`)
+    s.name = payload.name.trim() || undefined
+    persistSessions()
+  })
 
   ipcMain.handle('agents:list', () => listAgents())
 

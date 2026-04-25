@@ -48,6 +48,11 @@ export type TermhubApi = {
   sendInput: (id: string, data: string) => void
   resize: (id: string, cols: number, rows: number) => void
   close: (id: string) => void
+  // Parallel channel for the per-session docked bottom shell terminal.
+  // Distinct from the primary (claude) PTY; these target the user's
+  // interactive shell rooted in the session's cwd.
+  sendShellInput: (id: string, data: string) => void
+  resizeShell: (id: string, cols: number, rows: number) => void
   pickFolder: () => Promise<string | null>
   home: () => Promise<string>
   getConfig: () => Promise<Config>
@@ -59,6 +64,8 @@ export type TermhubApi = {
   onStatusChanged: (
     cb: (id: string, status: SessionStatus) => void,
   ) => () => void
+  onShellData: (cb: (id: string, data: string) => void) => () => void
+  onShellExit: (cb: (id: string, exitCode: number) => void) => () => void
   onSessionAdded: (
     cb: (
       id: string,
@@ -76,6 +83,7 @@ export type TermhubApi = {
   openAgent: (path: string) => Promise<void>
   listSkills: () => Promise<SkillDef[]>
   openSkill: (path: string) => Promise<void>
+  renameSession: (id: string, name: string) => Promise<void>
 }
 
 declare global {

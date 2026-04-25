@@ -347,12 +347,80 @@ body,
   position: relative;
   overflow: hidden;
   background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Primary (claude) pane — fills remaining space above the bottom shell. */
+.main-top {
+  flex: 1 1 auto;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Horizontal rule between the two stacked terminals. Fixed height; a
+   draggable resizer is future work. */
+.main-divider {
+  flex: 0 0 auto;
+  height: 4px;
+  background: var(--border);
+  cursor: row-resize;
+}
+
+/* Bottom shell pane — fixed v1 height. */
+.main-bottom {
+  flex: 0 0 220px;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+}
+
+.terminal-pane {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .terminal-container {
-  position: absolute;
-  inset: 0;
+  flex: 1;
+  min-height: 0;
   padding: 6px;
+  overflow: hidden;
+}
+
+.input-bar {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: 6px 8px;
+  background: var(--bg-elev);
+}
+
+.input-bar-textarea {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: none;
+  overflow-y: auto;
+  max-height: 120px;
+  line-height: 1.4;
+  outline: none;
+  display: block;
+}
+
+.input-bar-textarea:focus {
+  border-color: var(--accent);
+}
+
+.input-bar-textarea::placeholder {
+  color: var(--text-dim);
 }
 
 .terminal-container .xterm,
