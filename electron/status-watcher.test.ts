@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mapJsonlStatus, parseSessionStatus, encodeProjectPath } from './status-watcher'
+import { mapJsonlStatus, parseSessionStatus } from './status-watcher'
 
 describe('mapJsonlStatus', () => {
   it('maps idle to idle', () => {
@@ -66,30 +66,5 @@ describe('parseSessionStatus', () => {
 
   it('returns busy status', () => {
     expect(parseSessionStatus(JSON.stringify({ status: 'busy' }))).toBe('busy')
-  })
-})
-
-describe('encodeProjectPath', () => {
-  it('encodes a Windows absolute path', () => {
-    // Each \, :, / becomes a dash: "E:\Apps\termhub" → "E--Apps-termhub"
-    expect(encodeProjectPath('E:\\Apps\\termhub')).toBe('E--Apps-termhub')
-  })
-
-  it('encodes forward-slash paths the same way', () => {
-    expect(encodeProjectPath('E:/Apps/termhub')).toBe('E--Apps-termhub')
-  })
-
-  it('handles a drive root', () => {
-    expect(encodeProjectPath('D:\\')).toBe('D--')
-  })
-
-  it('matches the real directory name for the D:\\ cwd', () => {
-    // The projects directory for D:\ is ~/.claude/projects/D--/
-    expect(encodeProjectPath('D:\\')).toBe('D--')
-  })
-
-  it('encodes worktree paths correctly', () => {
-    const input = 'E:\\Apps\\termhub\\.claude\\worktrees\\jsonl-session-status'
-    expect(encodeProjectPath(input)).toBe('E--Apps-termhub--claude-worktrees-jsonl-session-status')
   })
 })

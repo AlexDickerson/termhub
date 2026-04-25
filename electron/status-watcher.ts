@@ -35,47 +35,14 @@ export function parseSessionStatus(content: string): string | undefined {
   return undefined
 }
 
-// Encode a filesystem path the same way Claude Code does when building the
-// ~/.claude/projects/<encoded-cwd>/ directory name. Each backslash, forward
-// slash, colon, or dot is replaced with a dash.
-export function encodeProjectPath(cwdArg: string): string {
-  return cwdArg.replace(/[\\/:\.]/g, '-')
-}
-
-const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects')
 const SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions')
-
-// Find the session ID of the most recently active Claude Code session in the
-// given cwd. Claude Code writes one JSONL file per session under
-// ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl, appending records as the
-// session progresses. The most recently modified file is the active session.
-// Returns the session ID (UUID string) or null if the directory is absent or empty.
-export function findActiveSessionId(cwd: string): string | null {
-  const dir = path.join(PROJECTS_DIR, encodeProjectPath(cwd))
-  let files: string[]
-  try {
-    files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'))
-  } catch {
-    return null
-  }
-  if (files.length === 0) return null
-
-  let best: { stem: string; mtime: number } | null = null
-  for (const file of files) {
-    try {
-      const stat = fs.statSync(path.join(dir, file))
-      if (!best || stat.mtimeMs > best.mtime) {
-        best = { stem: path.basename(file, '.jsonl'), mtime: stat.mtimeMs }
-      }
-    } catch {
-      // file gone between readdir and stat — skip
-    }
-  }
-  return best?.stem ?? null
-}
 
 // Find the ~/.claude/sessions/<pid>.json file whose `sessionId` field matches
 // the given session ID. Returns the full path or null if not found.
+//
+// termhub passes --session-id <id> to every claude invocation, so the session
+// file written by Claude Code will always have sessionId === termhub's own id.
+// This makes the lookup exact and race-free.
 export function findSessionFileBySessionId(sessionId: string): string | null {
   let files: string[]
   try {
@@ -101,45 +68,35 @@ export type WatcherHandle = {
   stop: () => void
 }
 
-// Watch the status of a Claude Code session by:
-//   1. Finding the active session ID via ~/.claude/projects/<encoded-cwd>/*.jsonl
-//      (the most recently modified file is the active session; its filename is
-//      the session ID).
-//   2. Finding the corresponding ~/.claude/sessions/<pid>.json by sessionId match.
-//   3. Polling that file every 500 ms and emitting mapped status on change.
+// Watch the status of a Claude Code session by looking up its runtime file at
+// ~/.claude/sessions/<pid>.json. The file is discovered by matching its
+// `sessionId` field against the termhub session id, which termhub passes as
+// --session-id to every claude invocation — making this lookup exact and
+// race-free with no cwd scanning or time-window heuristics.
 //
-// Before the session file appears (Claude Code creates it shortly after startup),
-// status stays at 'working' — we optimistically assume busy until the file says
-// otherwise.
+// The file is a single JSON object rewritten in-place on every status change,
+// so each poll reads the whole file.
 //
-// If the file disappears (session ended / pid reused), the watcher re-discovers
-// the active session on the next tick.
+// Before the file appears (Claude Code creates it shortly after startup),
+// status stays at 'working' — we optimistically assume busy until the file
+// says otherwise.
 export function watchSessionStatus(
-  cwd: string,
+  sessionId: string,
   onStatus: (status: SessionStatus) => void,
 ): WatcherHandle {
   let stopped = false
   let watchedPath: string | null = null
-  let watchedSessionId: string | null = null
   let lastEmitted: SessionStatus | undefined
 
   function poll() {
     if (stopped) return
 
-    // Discover (or re-discover) the session file if not yet found.
+    // Discover the session file if not yet found.
     if (!watchedPath) {
-      const sessionId = findActiveSessionId(cwd)
-      if (sessionId && sessionId !== watchedSessionId) {
-        const filePath = findSessionFileBySessionId(sessionId)
-        if (filePath) {
-          watchedPath = filePath
-          watchedSessionId = sessionId
-          console.log(
-            '[termhub:status] found session file (id=%s) at %s',
-            sessionId.slice(0, 8),
-            filePath,
-          )
-        }
+      const filePath = findSessionFileBySessionId(sessionId)
+      if (filePath) {
+        watchedPath = filePath
+        console.log('[termhub:status] found session file (id=%s) at %s', sessionId.slice(0, 8), filePath)
       }
     }
 
