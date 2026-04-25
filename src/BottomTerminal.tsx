@@ -94,9 +94,13 @@ export function BottomTerminal({
           return true
         }
 
-        void window.termhub.readClipboard().then((text) => {
-          if (text) term.paste(text)
-        })
+        // Ctrl+V: return false so xterm doesn't convert the keystroke into
+        // the SYN control char \x16 (and call preventDefault, which would
+        // suppress the textarea's native paste pipeline).  xterm's own
+        // built-in 'paste' listener on the textarea then handles writing
+        // the clipboard contents to the PTY with bracketed-paste-mode
+        // framing.  Calling readClipboard().then(term.paste()) here in
+        // addition produces a double paste.
         return false
       })
 

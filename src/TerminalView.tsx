@@ -76,59 +76,42 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
 
       // Single handler — xterm only keeps the last registered handler, so
       // all key interception must live in one call to attachCustomKeyEventHandler.
-      //
-      // Shift+Enter is intentionally NOT intercepted here.  Claude Code enables
-      // modifyOtherKeys mode (or the kitty keyboard protocol) in xterm.js by
-      // writing the appropriate escape sequence to the PTY as part of its
-      // startup.  In that mode xterm natively encodes Shift+Enter as the CSI
-      // sequence Claude Code expects (e.g. \x1b[27;2;13~) and emits it via
-      // onData, where it travels through sendInput to the PTY.
-      //
-      // Intercepting the key here and returning false suppresses that encoding
-      // and substitutes a custom byte sequence that Claude Code does not
-      // recognise, causing it to submit instead of inserting a newline.
       term.attachCustomKeyEventHandler((e) => {
+        // Shift+Enter: send the kitty keyboard-protocol encoding (\x1b[13;2u).
+        // xterm.js is in normal terminal mode (Claude Code does not enable
+        // modifyOtherKeys or kitty protocol on this xterm instance), so without
+        // interception xterm emits bare CR (0d) which Claude Code treats as
+        // "submit".  The kitty form is what Claude Code maps to "insert newline"
+        // in Kitty / WezTerm.
         if (e.type === 'keydown' && e.shiftKey && e.key === 'Enter') {
-          // Kitty keyboard-protocol encoding for Shift+Enter (\x1b[13;2u).
-          // xterm.js is in normal terminal mode (Claude Code does not enable
-          // modifyOtherKeys or kitty protocol on this xterm instance), so
-          // without interception xterm emits bare CR (0d) which Claude Code
-          // treats as "submit".  The kitty form is what Claude Code receives
-          // in Kitty / WezTerm and maps to "insert newline".
           e.preventDefault()
           window.termhub.sendInput(session.id, '\x1b[13;2u')
           return false
         }
 
-        // Ctrl+C / Ctrl+V: clipboard copy and paste.
-        if (e.type === 'keydown' && e.ctrlKey) {
-          const isC = e.code === 'KeyC'
-          const isV = e.code === 'KeyV'
-
-          if (isC) {
-            const hasSelection = term.hasSelection()
-            if (e.shiftKey || hasSelection) {
-              const text = term.getSelection()
-              if (text) {
-                window.termhub.writeClipboard(text)
-                term.clearSelection()
-              }
-              return false
+        if (e.type === 'keydown' && e.ctrlKey && e.code === 'KeyC') {
+          const hasSelection = term.hasSelection()
+          if (e.shiftKey || hasSelection) {
+            const text = term.getSelection()
+            if (text) {
+              window.termhub.writeClipboard(text)
+              term.clearSelection()
             }
-            return true
-          }
-
-          if (isV) {
-            // Prevent the browser from also firing a native 'paste' ClipboardEvent
-            // on the xterm textarea. Without this, xterm's own paste listener
-            // (registered on the textarea) fires after our term.paste() call,
-            // writing the clipboard text a second time.
-            e.preventDefault()
-            void window.termhub.readClipboard().then((text) => {
-              if (text) term.paste(text)
-            })
             return false
           }
+        }
+
+        // Ctrl+V: returning false stops xterm's _keyDown from converting
+        // the keystroke into the SYN control char \x16 and calling
+        // preventDefault on the keydown.  That preventDefault is what
+        // suppresses the browser's native textarea paste pipeline; with it
+        // gone, the textarea fires a real 'paste' ClipboardEvent and
+        // xterm's own paste listener handles it (calling term.paste() with
+        // bracketed-paste-mode framing).  No custom readClipboard call is
+        // needed — adding one produces a double paste because xterm's
+        // listener writes the same text again.
+        if (e.type === 'keydown' && e.ctrlKey && e.code === 'KeyV') {
+          return false
         }
 
         return true
