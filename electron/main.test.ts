@@ -7,6 +7,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 vi.mock('electron', () => ({
   app: {
     getPath: () => '/tmp',
+    setPath: () => {},
+    isPackaged: true,
     // Return a promise that never resolves so the whenReady callbacks
     // never fire and we avoid unhandled errors from incomplete mocks.
     whenReady: () => new Promise(() => {}),
