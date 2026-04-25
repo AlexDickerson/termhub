@@ -31,7 +31,14 @@ export function Sidebar({ groups, activeId, onNew, onSelect, onClose }: Props) {
                   onClick={() => onSelect(s.id)}
                 >
                   <span className="item-label">
-                    {basename(s.cwd)} <span className="item-num">#{idx + 1}</span>
+                    {s.name ? (
+                      s.name
+                    ) : (
+                      <>
+                        {basename(s.cwd)}{' '}
+                        <span className="item-num">#{idx + 1}</span>
+                      </>
+                    )}
                   </span>
                   <button
                     className="close-btn"

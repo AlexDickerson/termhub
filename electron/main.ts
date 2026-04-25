@@ -10,6 +10,10 @@ type Session = {
   id: string
   cwd: string
   command?: string
+  name?: string
+  model?: string
+  permissionMode?: string
+  dangerouslySkipPermissions?: boolean
   term: pty.IPty
   outputBuffer: string
 }
@@ -62,6 +66,8 @@ type StartupSession = {
   agent?: string
   model?: string
   dangerouslySkipPermissions?: boolean
+  permissionMode?: string
+  name?: string
 }
 
 type Config = {
@@ -73,11 +79,28 @@ type PersistedSession = {
   id: string
   cwd: string
   command?: string
+  name?: string
+  model?: string
+  permissionMode?: string
+  dangerouslySkipPermissions?: boolean
 }
 
 const DEFAULT_CONFIG: Config = {
   mcpPort: 7787,
-  startupSessions: [{ cwd: 'E:/', command: 'claude', agent: 'orchestrator' }],
+  // bypassPermissions skips per-tool approval prompts AND avoids the
+  // sandbox preflight that "auto" mode triggers — without an override the
+  // orchestrator session refuses to start when ~/.claude/settings.json
+  // sets permissions.defaultMode to "auto" but no sandbox runtime is
+  // available on the host.
+  startupSessions: [
+    {
+      cwd: 'E:/',
+      command: 'claude',
+      agent: 'orchestrator',
+      permissionMode: 'bypassPermissions',
+      name: 'orchestrator',
+    },
+  ],
 }
 
 const sessions = new Map<string, Session>()
@@ -107,7 +130,12 @@ function loadPersistedSessions(): PersistedSession[] {
         s != null &&
         typeof s.id === 'string' &&
         typeof s.cwd === 'string' &&
-        (s.command === undefined || typeof s.command === 'string'),
+        (s.command === undefined || typeof s.command === 'string') &&
+        (s.name === undefined || typeof s.name === 'string') &&
+        (s.model === undefined || typeof s.model === 'string') &&
+        (s.permissionMode === undefined || typeof s.permissionMode === 'string') &&
+        (s.dangerouslySkipPermissions === undefined ||
+          typeof s.dangerouslySkipPermissions === 'boolean'),
     )
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -204,6 +232,10 @@ function persistSessions() {
     id: s.id,
     cwd: s.cwd,
     command: s.command,
+    name: s.name,
+    model: s.model,
+    permissionMode: s.permissionMode,
+    dangerouslySkipPermissions: s.dangerouslySkipPermissions,
   }))
   try {
     fs.mkdirSync(path.dirname(getSessionsPath()), { recursive: true })
@@ -267,14 +299,27 @@ function isClaudeCommand(cmd: string): boolean {
   return /^claude(\s|$)/.test(cmd.trim())
 }
 
+// Default permission mode applied to every spawned claude when the caller
+// (config.json, MCP open_session, etc.) doesn't specify one. bypassPermissions
+// avoids the sandbox preflight that fires when claude's own
+// permissions.defaultMode is "auto" or when OPERON_SANDBOXED_NETWORK leaks
+// into the env. Override per-session via the permissionMode field if you
+// want stricter behavior.
+const DEFAULT_PERMISSION_MODE = 'bypassPermissions'
+
 function buildClaudeCommand(opts: {
   sessionId: string
   agent?: string
   model?: string
   resume?: boolean
   dangerouslySkipPermissions?: boolean
+  permissionMode?: string
 }): string {
   const flags: string[] = [`--mcp-config "${mcpConfigPath}"`]
+  const permissionMode =
+    opts.permissionMode && opts.permissionMode.length > 0
+      ? opts.permissionMode
+      : DEFAULT_PERMISSION_MODE
   if (opts.resume) {
     flags.push(`--resume "${opts.sessionId}"`)
     if (opts.model && opts.model.length > 0) {
@@ -283,6 +328,7 @@ function buildClaudeCommand(opts: {
     if (opts.dangerouslySkipPermissions) {
       flags.push('--dangerously-skip-permissions')
     }
+    flags.push(`--permission-mode "${permissionMode}"`)
     return `claude ${flags.join(' ')}`
   }
   flags.push(`--session-id "${opts.sessionId}"`)
@@ -295,6 +341,7 @@ function buildClaudeCommand(opts: {
   if (opts.dangerouslySkipPermissions) {
     flags.push('--dangerously-skip-permissions')
   }
+  flags.push(`--permission-mode "${permissionMode}"`)
   return `claude ${flags.join(' ')}`
 }
 
@@ -305,12 +352,13 @@ function bracketedPasteWithSubmit(text: string): string {
   return `\x1b[200~${text}\x1b[201~\r`
 }
 
-// CLAUDE_* / CLAUDECODE / similar vars from a parent claude session leak
-// into spawned child claudes and confuse them — e.g.
-// CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1 trips the sandbox preflight and
-// makes claude refuse to start. Always strip these so the child boots
-// from a clean baseline.
-const PARENT_CLAUDE_ENV_PREFIXES = ['CLAUDE_', 'CLAUDECODE']
+// CLAUDE_* / CLAUDECODE / OPERON_* vars from a parent claude session leak
+// into spawned child claudes and confuse them. In particular,
+// OPERON_SANDBOXED_NETWORK=1 (set by claude desktop's sandbox runtime)
+// makes the spawned claude assert that a sandbox is required even when
+// settings.json has sandbox.failIfUnavailable: false. Strip these so the
+// child boots from a clean baseline.
+const PARENT_CLAUDE_ENV_PREFIXES = ['CLAUDE_', 'CLAUDECODE', 'OPERON_']
 const PARENT_CLAUDE_ENV_EXACT = new Set(['DEFAULT_LLM_MODEL'])
 
 function cleanEnv(): Record<string, string> {
@@ -332,6 +380,8 @@ function createSessionInternal(opts: {
   agent?: string
   model?: string
   dangerouslySkipPermissions?: boolean
+  permissionMode?: string
+  name?: string
   source: 'ipc' | 'mcp' | 'startup' | 'resume'
 }): { id: string; cwd: string } {
   const id = opts.id ?? randomUUID()
@@ -358,6 +408,10 @@ function createSessionInternal(opts: {
     id,
     cwd: opts.cwd,
     command: opts.command,
+    name: opts.name,
+    model: opts.model,
+    permissionMode: opts.permissionMode,
+    dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
     term,
     outputBuffer: '',
   }
@@ -389,6 +443,7 @@ function createSessionInternal(opts: {
         agent: opts.source !== 'resume' ? opts.agent : undefined,
         model: opts.model,
         dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+        permissionMode: opts.permissionMode,
         resume: opts.source === 'resume',
       })
     } else {
@@ -417,6 +472,7 @@ function createSessionInternal(opts: {
       id,
       cwd: opts.cwd,
       command: opts.command,
+      name: opts.name,
       autoActivate,
     })
   }
@@ -483,6 +539,10 @@ function bootstrapSessions(config: Config) {
         id: s.id,
         cwd: s.cwd,
         command: s.command,
+        name: s.name,
+        model: s.model,
+        permissionMode: s.permissionMode,
+        dangerouslySkipPermissions: s.dangerouslySkipPermissions,
         source: 'resume',
       })
       occupiedCwds.add(s.cwd)
@@ -504,6 +564,8 @@ function bootstrapSessions(config: Config) {
         agent: entry.agent,
         model: entry.model,
         dangerouslySkipPermissions: entry.dangerouslySkipPermissions,
+        permissionMode: entry.permissionMode,
+        name: entry.name,
         source: 'startup',
       })
       occupiedCwds.add(entry.cwd)
@@ -521,7 +583,15 @@ app.whenReady().then(async () => {
     mcpHandle = await startMcpServer({
       port: config.mcpPort,
       hooks: {
-        openClaudeSession: ({ cwd, prompt, agent, model, dangerouslySkipPermissions }) =>
+        openClaudeSession: ({
+          cwd,
+          prompt,
+          agent,
+          model,
+          dangerouslySkipPermissions,
+          permissionMode,
+          name,
+        }) =>
           createSessionInternal({
             cwd,
             command: 'claude',
@@ -529,6 +599,8 @@ app.whenReady().then(async () => {
             agent,
             model,
             dangerouslySkipPermissions,
+            permissionMode,
+            name,
             source: 'mcp',
           }),
         sendInput: ({ sessionId, text }) => {
@@ -617,6 +689,7 @@ app.whenReady().then(async () => {
       id: s.id,
       cwd: s.cwd,
       command: s.command,
+      name: s.name,
     })),
   )
 

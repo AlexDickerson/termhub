@@ -60,6 +60,28 @@ async function main() {
               'approval prompts. Use only for autonomous workers where you trust the prompt and ' +
               'agent definition; the worker can take any action without confirmation.',
           ),
+        permissionMode: z
+          .enum([
+            'acceptEdits',
+            'auto',
+            'bypassPermissions',
+            'default',
+            'dontAsk',
+            'plan',
+          ])
+          .optional()
+          .describe(
+            'Permission mode for the new session — passed to claude as --permission-mode. ' +
+              "Use 'bypassPermissions' for autonomous workers, 'plan' for read-only planning, " +
+              "or 'default' to prompt on every action. 'auto' requires a sandbox runtime.",
+          ),
+        name: z
+          .string()
+          .optional()
+          .describe(
+            'Display name for the session, shown in the termhub sidebar. ' +
+              'Falls back to the cwd basename when omitted.',
+          ),
       },
     },
     async (args) => {
@@ -73,6 +95,8 @@ async function main() {
             agent: args.agent,
             model: args.model,
             dangerouslySkipPermissions: args.dangerouslySkipPermissions,
+            permissionMode: args.permissionMode,
+            name: args.name,
           }),
         })
         if (!response.ok) {
