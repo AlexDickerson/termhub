@@ -1,10 +1,98 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   bracketedPaste,
+  buildClaudeArgs,
   cleanEnv,
   isClaudeCommand,
   writeBracketedPasteAndSubmit,
 } from './claude-command'
+
+const BUILD_ARGS_BASE = {
+  sessionId: 'test-session-id',
+  mcpConfigPath: '/path/to/mcp.json',
+}
+
+describe('buildClaudeArgs', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('neither flag — no skip-permissions flags emitted', () => {
+    const flags = buildClaudeArgs({ ...BUILD_ARGS_BASE })
+    expect(flags.join(' ')).not.toContain('--dangerously-skip-permissions')
+    expect(flags.join(' ')).not.toContain('--allow-dangerously-skip-permissions')
+  })
+
+  it('only dangerouslySkipPermissions — emits --dangerously-skip-permissions', () => {
+    const flags = buildClaudeArgs({
+      ...BUILD_ARGS_BASE,
+      dangerouslySkipPermissions: true,
+    })
+    expect(flags).toContain('--dangerously-skip-permissions')
+    expect(flags.join(' ')).not.toContain('--allow-dangerously-skip-permissions')
+  })
+
+  it('only allowDangerouslySkipPermissions — emits --allow-dangerously-skip-permissions', () => {
+    const flags = buildClaudeArgs({
+      ...BUILD_ARGS_BASE,
+      allowDangerouslySkipPermissions: true,
+    })
+    expect(flags).toContain('--allow-dangerously-skip-permissions')
+    expect(flags.join(' ')).not.toContain(' --dangerously-skip-permissions')
+  })
+
+  it('both flags — dangerouslySkipPermissions wins, allow flag omitted, warning logged', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const flags = buildClaudeArgs({
+      ...BUILD_ARGS_BASE,
+      dangerouslySkipPermissions: true,
+      allowDangerouslySkipPermissions: true,
+    })
+    expect(flags).toContain('--dangerously-skip-permissions')
+    expect(flags.join(' ')).not.toContain('--allow-dangerously-skip-permissions')
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn.mock.calls[0][0]).toContain(
+      'dangerouslySkipPermissions takes precedence',
+    )
+  })
+
+  it('includes --session-id for a non-resume call', () => {
+    const flags = buildClaudeArgs({ ...BUILD_ARGS_BASE })
+    expect(flags.some((f) => f.includes('--session-id'))).toBe(true)
+    expect(flags.join(' ')).not.toContain('--resume')
+  })
+
+  it('includes --resume for a resume call', () => {
+    const flags = buildClaudeArgs({ ...BUILD_ARGS_BASE, resume: true })
+    expect(flags.some((f) => f.includes('--resume'))).toBe(true)
+    expect(flags.join(' ')).not.toContain('--session-id')
+  })
+
+  it('includes --permission-mode with provided value', () => {
+    const flags = buildClaudeArgs({ ...BUILD_ARGS_BASE, permissionMode: 'plan' })
+    expect(
+      flags.some((f) => f.includes('--permission-mode') && f.includes('plan')),
+    ).toBe(true)
+  })
+
+  it('defaults --permission-mode to bypassPermissions when omitted', () => {
+    const flags = buildClaudeArgs({ ...BUILD_ARGS_BASE })
+    expect(
+      flags.some(
+        (f) => f.includes('--permission-mode') && f.includes('bypassPermissions'),
+      ),
+    ).toBe(true)
+  })
+
+  it('includes --mcp-config with the provided path', () => {
+    const flags = buildClaudeArgs({ ...BUILD_ARGS_BASE })
+    expect(
+      flags.some(
+        (f) => f.includes('--mcp-config') && f.includes('/path/to/mcp.json'),
+      ),
+    ).toBe(true)
+  })
+})
 
 describe('isClaudeCommand', () => {
   it('matches "claude" alone', () => {
