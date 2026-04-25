@@ -21,15 +21,29 @@ export function Sidebar({ groups, activeId, onNew, onSelect, onClose, onRename }
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Find the session object from context menu id
+  const contextSession = contextMenu
+    ? [...groups.values()].flat().find((s) => s.id === contextMenu.sessionId) ?? null
+    : null
 
   // Close context menu on outside click or Escape
   useEffect(() => {
     if (!contextMenu) return
-    const close = () => setContextMenu(null)
-    window.addEventListener('click', close)
-    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') close() })
+    const onMouseDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setContextMenu(null)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null)
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    document.addEventListener('keydown', onKeyDown)
     return () => {
-      window.removeEventListener('click', close)
+      document.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('keydown', onKeyDown)
     }
   }, [contextMenu])
 
@@ -64,10 +78,16 @@ export function Sidebar({ groups, activeId, onNew, onSelect, onClose, onRename }
     setContextMenu({ sessionId: session.id, x: e.clientX, y: e.clientY })
   }, [])
 
-  // Find the session object from context menu id
-  const contextSession = contextMenu
-    ? [...groups.values()].flat().find((s) => s.id === contextMenu.sessionId) ?? null
-    : null
+  const handleOpenInVSCode = useCallback(async () => {
+    if (!contextSession) return
+    const { cwd } = contextSession
+    setContextMenu(null)
+    try {
+      await window.termhub.openInVSCode(cwd)
+    } catch (err) {
+      console.error('[termhub] openInVSCode failed:', err)
+    }
+  }, [contextSession])
 
   return (
     <aside className="sidebar">
@@ -141,10 +161,17 @@ export function Sidebar({ groups, activeId, onNew, onSelect, onClose, onRename }
 
       {contextMenu && contextSession && (
         <div
+          ref={menuRef}
           className="context-menu"
           style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
+          <button
+            className="context-menu-item"
+            onClick={() => void handleOpenInVSCode()}
+          >
+            Open in VS Code
+          </button>
           <button
             className="context-menu-item"
             onClick={() => startRename(contextSession)}

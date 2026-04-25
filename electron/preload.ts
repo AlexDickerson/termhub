@@ -126,6 +126,9 @@ const api = {
 
   renameSession: (id: string, name: string): Promise<void> =>
     ipcRenderer.invoke('session:rename', { id, name }),
+
+  openInVSCode: (cwd: string): Promise<void> =>
+    ipcRenderer.invoke('vscode:open', cwd),
 }
 
 contextBridge.exposeInMainWorld('termhub', api)

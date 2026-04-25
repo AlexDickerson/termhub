@@ -3,6 +3,7 @@ import * as pty from '@lydell/node-pty'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import * as fs from 'node:fs'
+import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { startMcpServer, type McpHandle } from './mcp'
 
@@ -809,6 +810,23 @@ app.whenReady().then(async () => {
     }
     const err = await shell.openPath(resolved)
     if (err) throw new Error(err)
+  })
+
+  ipcMain.handle('vscode:open', (_event, cwd: string) => {
+    return new Promise<void>((resolve, reject) => {
+      const proc = spawn('code', [cwd], {
+        shell: true,
+        detached: true,
+        stdio: 'ignore',
+      })
+      proc.unref()
+      proc.on('error', (err) => {
+        console.error('[termhub] failed to open VS Code:', err)
+        reject(err)
+      })
+      // Resolve immediately — we don't wait for the editor to close
+      resolve()
+    })
   })
 
   ipcMain.handle('dialog:pickFolder', async () => {
