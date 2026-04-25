@@ -8,12 +8,28 @@ import { randomUUID } from 'node:crypto'
 import { startMcpServer, type McpHandle } from './mcp'
 import { isAllowedExternalUrl } from './links'
 import { watchSessionStatus, type WatcherHandle } from './status-watcher'
-import type {
-  AgentDef,
-  Config,
-  SessionStatus,
-  SkillDef,
-} from '../src/types'
+import type { Config, SessionStatus } from '../src/types'
+import { appendToBuffer, stripAnsi } from './output-buffer'
+import { detectRepoRoot } from './repo-root'
+import {
+  buildClaudeCommand,
+  cleanEnv,
+  isClaudeCommand,
+  writeBracketedPasteAndSubmit,
+} from './claude-command'
+import { listAgents, listSkills, getAgentsDir, getSkillsDir } from './agents-skills'
+import { getConfigPath, getMcpConfigPath, loadConfig } from './config'
+import {
+  loadPersistedSessions,
+  writePersistedSessions,
+  type PersistedSession,
+} from './persistence'
+
+// Re-export buildClaudeArgs so the existing main.test.ts import keeps
+// working without churn while #7b is in flight. The canonical export now
+// lives in ./claude-command and the test will be moved when status/session
+// management lands there.
+export { buildClaudeArgs } from './claude-command'
 
 // Isolate dev builds so their sessions, config, and MCP port don't bleed into
 // the production instance running alongside. Must be called before the first
@@ -48,8 +64,6 @@ type Session = {
   shellTerm: pty.IPty
 }
 
-const MAX_OUTPUT_BUFFER_BYTES = 256 * 1024
-
 // Validate cols/rows from the renderer and forward to a PTY. Both the primary
 // (claude) and the secondary (shell) PTYs receive resize requests on every UI
 // resize / divider drag, so this gets called frequently. Non-finite values
@@ -68,25 +82,6 @@ export function resizePty(target: PtyResizeTarget, cols: number, rows: number): 
   } catch {
     // pty may have exited between resize requests
   }
-}
-
-function appendToBuffer(buf: string, chunk: string): string {
-  const combined = buf + chunk
-  if (combined.length <= MAX_OUTPUT_BUFFER_BYTES) return combined
-  return combined.slice(combined.length - MAX_OUTPUT_BUFFER_BYTES)
-}
-
-// Lossy but adequate ANSI/control-char stripper for read_output. Captures
-// CSI/OSC/DCS sequences and stray control bytes; doesn't replay cursor
-// movement, so heavy TUI output (e.g. claude's input box) won't reconstruct
-// perfectly — but plain text and message bodies come through cleanly.
-function stripAnsi(s: string): string {
-  return s
-    .replace(/\x1b\[[\d;?]*[a-zA-Z]/g, '')
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-    .replace(/\x1b[PX^_][\s\S]*?\x1b\\/g, '')
-    .replace(/\x1b[=>()*+\-.\/]./g, '')
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
 }
 
 // ---------------------------------------------------------------------------
@@ -122,53 +117,6 @@ function setStatus(session: Session, next: SessionStatus) {
   mainWindow?.webContents.send('session:status', { id: session.id, status: next })
 }
 
-// Walk upward from cwd looking for a .git entry (file or directory).
-// If found as a file (worktree), parse the `gitdir:` line to resolve the
-// main checkout root (two dirname()s up from the worktree-specific gitdir).
-// Returns { repoRoot, repoLabel } or null when no repo is found.
-function detectRepoRoot(cwd: string): { repoRoot: string; repoLabel: string } | null {
-  let current = path.resolve(cwd)
-  while (true) {
-    const gitEntry = path.join(current, '.git')
-    let stat: fs.Stats | null = null
-    try {
-      stat = fs.statSync(gitEntry)
-    } catch {
-      // not found at this level — keep walking
-    }
-    if (stat !== null) {
-      if (stat.isDirectory()) {
-        // Normal checkout: .git directory means this directory IS the repo root
-        return { repoRoot: current, repoLabel: path.basename(current) }
-      }
-      if (stat.isFile()) {
-        // Git worktree: .git file contains "gitdir: <path>"
-        try {
-          const contents = fs.readFileSync(gitEntry, 'utf8')
-          const m = /^gitdir:\s*(.+)$/m.exec(contents)
-          if (m) {
-            // Typically: <main-checkout>/.git/worktrees/<name>
-            // Two dirname()s up: strip /<name> then /worktrees → <main-checkout>/.git
-            // One more dirname(): the main checkout root
-            const worktreeGitDir = path.resolve(current, m[1].trim())
-            const mainGit = path.dirname(path.dirname(worktreeGitDir))
-            const mainCheckout = path.dirname(mainGit)
-            return { repoRoot: mainCheckout, repoLabel: path.basename(mainCheckout) }
-          }
-        } catch {
-          // unreadable .git file — treat as no-repo
-        }
-      }
-    }
-    const parent = path.dirname(current)
-    if (parent === current) {
-      // Reached filesystem root — no repo found
-      return null
-    }
-    current = parent
-  }
-}
-
 type FindSessionResult =
   | { found: true; session: Session }
   | { found: false; error: string }
@@ -189,159 +137,14 @@ function findSessionByIdOrPrefix(idOrPrefix: string): FindSessionResult {
   }
 }
 
-type PersistedSession = {
-  id: string
-  cwd: string
-  command?: string
-  name?: string
-  model?: string
-  permissionMode?: string
-  dangerouslySkipPermissions?: boolean
-  allowDangerouslySkipPermissions?: boolean
-}
-
-const DEFAULT_CONFIG: Config = {
-  // Dev builds get port 7788 so they don't conflict with the production
-  // instance on 7787 when both are running at the same time.
-  mcpPort: app.isPackaged ? 7787 : 7788,
-  // bypassPermissions skips per-tool approval prompts AND avoids the
-  // sandbox preflight that "auto" mode triggers — without an override the
-  // orchestrator session refuses to start when ~/.claude/settings.json
-  // sets permissions.defaultMode to "auto" but no sandbox runtime is
-  // available on the host.
-  startupSessions: [
-    {
-      cwd: 'E:/',
-      command: 'claude',
-      agent: 'orchestrator',
-      permissionMode: 'bypassPermissions',
-      name: 'orchestrator',
-    },
-  ],
-}
-
 const sessions = new Map<string, Session>()
 let mainWindow: BrowserWindow | null = null
 let mcpHandle: McpHandle | null = null
 let mcpConfigPath = ''
 
-function getConfigPath(): string {
-  return path.join(app.getPath('userData'), 'config.json')
-}
-
-function getMcpConfigPath(): string {
-  return path.join(app.getPath('userData'), 'mcp-config.json')
-}
-
-function getSessionsPath(): string {
-  return path.join(app.getPath('userData'), 'sessions.json')
-}
-
-function loadPersistedSessions(): PersistedSession[] {
-  try {
-    const raw = fs.readFileSync(getSessionsPath(), 'utf8')
-    const arr = JSON.parse(raw)
-    if (!Array.isArray(arr)) return []
-    return arr.filter(
-      (s): s is PersistedSession =>
-        s != null &&
-        typeof s.id === 'string' &&
-        typeof s.cwd === 'string' &&
-        (s.command === undefined || typeof s.command === 'string') &&
-        (s.name === undefined || typeof s.name === 'string') &&
-        (s.model === undefined || typeof s.model === 'string') &&
-        (s.permissionMode === undefined || typeof s.permissionMode === 'string') &&
-        (s.dangerouslySkipPermissions === undefined ||
-          typeof s.dangerouslySkipPermissions === 'boolean') &&
-        (s.allowDangerouslySkipPermissions === undefined ||
-          typeof s.allowDangerouslySkipPermissions === 'boolean'),
-    )
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      console.error('[termhub] failed to load persisted sessions:', err)
-    }
-    return []
-  }
-}
-
-function getAgentsDir(): string {
-  return path.join(os.homedir(), '.claude', 'agents')
-}
-
-function getSkillsDir(): string {
-  return path.join(os.homedir(), '.claude', 'skills')
-}
-
-function listAgents(): AgentDef[] {
-  const dir = getAgentsDir()
-  let entries: string[]
-  try {
-    entries = fs.readdirSync(dir)
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
-    console.error('[termhub] failed to list agents:', err)
-    return []
-  }
-  const out: AgentDef[] = []
-  for (const entry of entries) {
-    if (!entry.toLowerCase().endsWith('.md')) continue
-    const filePath = path.join(dir, entry)
-    let stat
-    try {
-      stat = fs.statSync(filePath)
-    } catch {
-      continue
-    }
-    if (!stat.isFile()) continue
-    const name = entry.replace(/\.md$/i, '')
-    const description = parseAgentDescription(filePath)
-    out.push({ name, path: filePath, description })
-  }
-  out.sort((a, b) => a.name.localeCompare(b.name))
-  return out
-}
-
-function parseAgentDescription(filePath: string): string | undefined {
-  try {
-    const content = fs.readFileSync(filePath, 'utf8')
-    const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content)
-    if (!m) return undefined
-    const desc = /^description:\s*(.+)$/im.exec(m[1])
-    if (!desc) return undefined
-    return desc[1].trim().replace(/^["']|["']$/g, '')
-  } catch {
-    return undefined
-  }
-}
-
-function listSkills(): SkillDef[] {
-  const dir = getSkillsDir()
-  let entries: fs.Dirent[]
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true })
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
-    console.error('[termhub] failed to list skills:', err)
-    return []
-  }
-  const out: SkillDef[] = []
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    const skillMdPath = path.join(dir, entry.name, 'SKILL.md')
-    let stat
-    try {
-      stat = fs.statSync(skillMdPath)
-    } catch {
-      continue
-    }
-    if (!stat.isFile()) continue
-    const description = parseAgentDescription(skillMdPath)
-    out.push({ name: entry.name, path: skillMdPath, description })
-  }
-  out.sort((a, b) => a.name.localeCompare(b.name))
-  return out
-}
-
+// Thin wrapper around writePersistedSessions that snapshots the live
+// `sessions` Map into the persistence wire format. Called whenever
+// session state changes (create / close / rename / exit).
 function persistSessions() {
   const list: PersistedSession[] = Array.from(sessions.values()).map((s) => ({
     id: s.id,
@@ -353,34 +156,7 @@ function persistSessions() {
     dangerouslySkipPermissions: s.dangerouslySkipPermissions,
     allowDangerouslySkipPermissions: s.allowDangerouslySkipPermissions,
   }))
-  try {
-    fs.mkdirSync(path.dirname(getSessionsPath()), { recursive: true })
-    fs.writeFileSync(getSessionsPath(), JSON.stringify(list, null, 2))
-  } catch (err) {
-    console.error('[termhub] failed to persist sessions:', err)
-  }
-}
-
-function loadConfig(): Config {
-  const configPath = getConfigPath()
-  try {
-    const raw = fs.readFileSync(configPath, 'utf8')
-    const parsed = JSON.parse(raw) as Partial<Config>
-    return { ...DEFAULT_CONFIG, ...parsed }
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      try {
-        fs.mkdirSync(path.dirname(configPath), { recursive: true })
-        fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2))
-        console.log(`[termhub] wrote default config to ${configPath}`)
-      } catch (writeErr) {
-        console.error('[termhub] failed to write default config:', writeErr)
-      }
-      return DEFAULT_CONFIG
-    }
-    console.error('[termhub] failed to read config:', err)
-    return DEFAULT_CONFIG
-  }
+  writePersistedSessions(list)
 }
 
 function getBridgePath(): string {
@@ -411,108 +187,6 @@ function writeMcpConfigFile(port: number): string {
   return configPath
 }
 
-function isClaudeCommand(cmd: string): boolean {
-  return /^claude(\s|$)/.test(cmd.trim())
-}
-
-// Default permission mode applied to every spawned claude when the caller
-// (config.json, MCP open_session, etc.) doesn't specify one. bypassPermissions
-// avoids the sandbox preflight that fires when claude's own
-// permissions.defaultMode is "auto" or when OPERON_SANDBOXED_NETWORK leaks
-// into the env. Override per-session via the permissionMode field if you
-// want stricter behavior.
-const DEFAULT_PERMISSION_MODE = 'bypassPermissions'
-
-// Pure helper — builds the flag list for a `claude` invocation. Exported for
-// unit testing; contains no side effects.
-export function buildClaudeArgs(opts: {
-  sessionId: string
-  mcpConfigPath: string
-  agent?: string
-  model?: string
-  resume?: boolean
-  dangerouslySkipPermissions?: boolean
-  allowDangerouslySkipPermissions?: boolean
-  permissionMode?: string
-}): string[] {
-  const permissionMode =
-    opts.permissionMode && opts.permissionMode.length > 0
-      ? opts.permissionMode
-      : DEFAULT_PERMISSION_MODE
-
-  const flags: string[] = [`--mcp-config "${opts.mcpConfigPath}"`]
-
-  if (opts.resume) {
-    flags.push(`--resume "${opts.sessionId}"`)
-    if (opts.model && opts.model.length > 0) {
-      flags.push(`--model "${opts.model}"`)
-    }
-  } else {
-    flags.push(`--session-id "${opts.sessionId}"`)
-    if (opts.agent && opts.agent.length > 0) {
-      flags.push(`--agent "${opts.agent}"`)
-    }
-    if (opts.model && opts.model.length > 0) {
-      flags.push(`--model "${opts.model}"`)
-    }
-  }
-
-  if (opts.dangerouslySkipPermissions) {
-    if (opts.allowDangerouslySkipPermissions) {
-      console.warn(
-        '[termhub:session] both dangerouslySkipPermissions and allowDangerouslySkipPermissions set' +
-          ' — dangerouslySkipPermissions takes precedence; ignoring allowDangerouslySkipPermissions',
-      )
-    }
-    flags.push('--dangerously-skip-permissions')
-  } else if (opts.allowDangerouslySkipPermissions) {
-    flags.push('--allow-dangerously-skip-permissions')
-  }
-
-  flags.push(`--permission-mode "${permissionMode}"`)
-  return flags
-}
-
-function buildClaudeCommand(opts: {
-  sessionId: string
-  agent?: string
-  model?: string
-  resume?: boolean
-  dangerouslySkipPermissions?: boolean
-  allowDangerouslySkipPermissions?: boolean
-  permissionMode?: string
-}): string {
-  const flags = buildClaudeArgs({ ...opts, mcpConfigPath })
-  return `claude ${flags.join(' ')}`
-}
-
-// Wrap text in bracketed-paste markers + Enter. Claude's TUI (Ink) handles
-// bracketed paste atomically, so arbitrarily long / shell-special content
-// can be injected without cmd.exe seeing or trying to parse it.
-function bracketedPasteWithSubmit(text: string): string {
-  return `\x1b[200~${text}\x1b[201~\r`
-}
-
-// CLAUDE_* / CLAUDECODE / OPERON_* vars from a parent claude session leak
-// into spawned child claudes and confuse them. In particular,
-// OPERON_SANDBOXED_NETWORK=1 (set by claude desktop's sandbox runtime)
-// makes the spawned claude assert that a sandbox is required even when
-// settings.json has sandbox.failIfUnavailable: false. Strip these so the
-// child boots from a clean baseline.
-const PARENT_CLAUDE_ENV_PREFIXES = ['CLAUDE_', 'CLAUDECODE', 'OPERON_']
-const PARENT_CLAUDE_ENV_EXACT = new Set(['DEFAULT_LLM_MODEL'])
-
-function cleanEnv(): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(process.env)) {
-    if (typeof v !== 'string') continue
-    if (PARENT_CLAUDE_ENV_EXACT.has(k)) continue
-    if (PARENT_CLAUDE_ENV_PREFIXES.some((p) => k.startsWith(p))) continue
-    out[k] = v
-  }
-  return out
-}
-
 function createSessionInternal(opts: {
   id?: string
   cwd: string
@@ -525,7 +199,7 @@ function createSessionInternal(opts: {
   permissionMode?: string
   name?: string
   source: 'ipc' | 'mcp' | 'startup' | 'resume'
-}): { id: string; cwd: string } {
+}): { id: string; cwd: string; promptSettled: Promise<void> } {
   const id = opts.id ?? randomUUID()
   const shell = process.env.COMSPEC || 'cmd.exe'
   console.log(
@@ -599,11 +273,69 @@ function createSessionInternal(opts: {
   // reading happens to equal the initial 'working' default.
   setStatus(session, session.status)
 
+  // Initial-prompt delivery. We need claude's TUI to be fully booted AND
+  // sitting at the input prompt before we paste — otherwise the paste
+  // arrives while claude is mid-load (status 'busy') and Ink's submit
+  // handler hasn't been wired yet. Bracketed-paste mode does work pre-
+  // submit-wiring, so the text lands in the input box, but the trailing
+  // CR doesn't fire submit.
+  //
+  // Strategy: gate the paste on the JSONL watcher reporting status 'idle'
+  // — that's the unambiguous "Ink is rendered, input prompt is showing,
+  // submit handler is wired" signal. Caller awaits `promptSettled` to
+  // serialize spawns: see openSessionQueue below.
+  //
+  // promptSettled resolves once delivery is complete (paste + CR
+  // written), or once we know it's never going to happen (fallback fired,
+  // session exited, no prompt provided).
+  const wantsPrompt =
+    opts.source !== 'resume' && opts.prompt !== undefined && opts.prompt.length > 0
+  let promptSent = false
+  let resolvePromptSettled: () => void = () => {}
+  const promptSettled: Promise<void> = wantsPrompt
+    ? new Promise<void>((resolve) => {
+        resolvePromptSettled = resolve
+      })
+    : Promise.resolve()
+
+  const sendPromptOnce = async () => {
+    if (promptSent) return
+    if (!sessions.has(id) || !opts.prompt || opts.prompt.length === 0) {
+      resolvePromptSettled()
+      return
+    }
+    promptSent = true
+    try {
+      await writeBracketedPasteAndSubmit(session.term, opts.prompt)
+    } finally {
+      resolvePromptSettled()
+    }
+  }
+
+  if (wantsPrompt) {
+    setTimeout(() => {
+      if (!promptSent) {
+        console.warn(
+          `[termhub:session] ${id.slice(0, 8)} JSONL idle-readiness fallback fired (15s) — sending prompt anyway`,
+        )
+        void sendPromptOnce()
+      }
+    }, 15000)
+  }
+
   // Watch the Claude Code JSONL file for ground-truth status updates. The
   // file is created by Claude Code shortly after startup; the watcher polls
   // and will begin emitting once the file appears.
   if (opts.command && isClaudeCommand(opts.command)) {
     session.jsonlWatcher = watchSessionStatus(id, (next) => {
+      // Send the initial prompt the first time claude reports 'idle'
+      // (parked at the input prompt, submit handler wired). 'busy' and
+      // 'awaiting' would race with submit-handler setup.
+      if (!promptSent && wantsPrompt && next === 'idle') {
+        // Tiny grace for Ink's first paint after the status write,
+        // defensive against OS-level pty write batching.
+        setTimeout(() => { void sendPromptOnce() }, 250)
+      }
       // 'failed' is only set on PTY exit — never override it from JSONL.
       if (session.status !== 'failed') {
         setStatus(session, next)
@@ -628,6 +360,9 @@ function createSessionInternal(opts: {
       session.jsonlWatcher.stop()
       session.jsonlWatcher = null
     }
+    // Unblock any caller awaiting promptSettled — the session is gone, so
+    // the prompt is never going to be delivered.
+    resolvePromptSettled()
     // Emit the terminal status BEFORE the exit event so the renderer has
     // it set when it decides whether to keep the row visible.
     setStatus(session, exitCode === 0 ? 'idle' : 'failed')
@@ -664,6 +399,7 @@ function createSessionInternal(opts: {
     if (isClaudeCommand(opts.command)) {
       finalCommand = buildClaudeCommand({
         sessionId: id,
+        mcpConfigPath,
         agent: opts.source !== 'resume' ? opts.agent : undefined,
         model: opts.model,
         dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
@@ -679,18 +415,6 @@ function createSessionInternal(opts: {
     }, 150)
   }
 
-  // Send the prompt to claude's TUI as a bracketed paste, after it's had
-  // time to start. This avoids cmd.exe's quoting limits for prompts with
-  // embedded quotes, backticks, $(), <>, etc.
-  if (opts.source !== 'resume' && opts.prompt && opts.prompt.length > 0) {
-    const text = opts.prompt
-    setTimeout(() => {
-      if (sessions.has(id)) {
-        session.term.write(bracketedPasteWithSubmit(text))
-      }
-    }, 2500)
-  }
-
   if (opts.source !== 'ipc') {
     const autoActivate = opts.source === 'startup' || opts.source === 'resume'
     mainWindow?.webContents.send('session:added', {
@@ -704,7 +428,7 @@ function createSessionInternal(opts: {
     })
   }
 
-  return { id, cwd: opts.cwd }
+  return { id, cwd: opts.cwd, promptSettled }
 }
 
 function createWindow() {
@@ -828,11 +552,22 @@ app.whenReady().then(async () => {
   const config = loadConfig()
   mcpConfigPath = writeMcpConfigFile(config.mcpPort)
 
+  // Serialize MCP open_session calls. The orchestrator can fan out N
+  // parallel open_session requests; we chain each through this queue so
+  // session N+1 only begins spawning after session N has finished
+  // delivering its initial prompt (paste + CR written, or settled via
+  // fallback / exit). Without serialization, simultaneous spawns contend
+  // for CPU and I/O, claude takes longer to reach 'idle', and prompts
+  // pasted before the submit handler is fully wired land in the input
+  // box without firing submit. The HTTP layer in mcp.ts is unchanged —
+  // serialization happens entirely inside this hook.
+  let openSessionQueue: Promise<unknown> = Promise.resolve()
+
   try {
     mcpHandle = await startMcpServer({
       port: config.mcpPort,
       hooks: {
-        openClaudeSession: ({
+        openClaudeSession: async ({
           cwd,
           prompt,
           agent,
@@ -841,24 +576,42 @@ app.whenReady().then(async () => {
           allowDangerouslySkipPermissions,
           permissionMode,
           name,
-        }) =>
-          createSessionInternal({
-            cwd,
-            command: 'claude',
-            prompt,
-            agent,
-            model,
-            dangerouslySkipPermissions,
-            allowDangerouslySkipPermissions,
-            permissionMode,
-            name,
-            source: 'mcp',
-          }),
+        }) => {
+          // Wait for the previous open_session to fully settle. The
+          // .catch flattens any rejection from a prior link so a single
+          // failure doesn't poison the chain for everyone behind it.
+          const myTurn = openSessionQueue.catch(() => {})
+          let release!: (value: unknown) => void
+          openSessionQueue = new Promise((resolve) => { release = resolve })
+          await myTurn
+          try {
+            const result = createSessionInternal({
+              cwd,
+              command: 'claude',
+              prompt,
+              agent,
+              model,
+              dangerouslySkipPermissions,
+              allowDangerouslySkipPermissions,
+              permissionMode,
+              name,
+              source: 'mcp',
+            })
+            // Hold the queue until the prompt is delivered (or settled
+            // via fallback / session exit). The HTTP response goes back
+            // here, after the await — the orchestrator sees one session
+            // start fully before the next one begins.
+            await result.promptSettled
+            return { id: result.id, cwd: result.cwd }
+          } finally {
+            release(undefined)
+          }
+        },
         sendInput: ({ sessionId, text }) => {
           const result = findSessionByIdOrPrefix(sessionId)
           if (!result.found) return { ok: false, error: result.error }
           try {
-            result.session.term.write(bracketedPasteWithSubmit(text))
+            writeBracketedPasteAndSubmit(result.session.term, text)
             return { ok: true }
           } catch (err) {
             return {
