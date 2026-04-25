@@ -111,6 +111,16 @@ export function BottomTerminal({
         window.termhub.resizeShell(session.id, cols, rows)
       })
 
+      // Snap-to-bottom fix: mirrors TerminalView — see the comment there.
+      let prevYdisp = 0
+      term.onScroll((newYdisp) => {
+        const ybase = term.buffer.active.baseY
+        if (newYdisp > prevYdisp && newYdisp >= ybase - 1 && newYdisp < ybase) {
+          term.scrollToBottom()
+        }
+        prevYdisp = newYdisp
+      })
+
       term.open(container)
       try {
         fit.fit()

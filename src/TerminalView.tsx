@@ -129,6 +129,22 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
         window.termhub.resize(session.id, cols, rows)
       })
 
+      // Snap-to-bottom fix: xterm's internal pixel rounding can leave the
+      // scrollbar 1 line short of ybase when the user scrolls down after new
+      // output has arrived while they were scrolled up.  When the viewport
+      // moves downward and gets within 1 line of ybase, snap all the way to
+      // the bottom so the final line is always reachable.
+      // We only fire when scrolling downward (newYdisp > prevYdisp) to avoid
+      // fighting the user when they intentionally scroll up from the bottom.
+      let prevYdisp = 0
+      term.onScroll((newYdisp) => {
+        const ybase = term.buffer.active.baseY
+        if (newYdisp > prevYdisp && newYdisp >= ybase - 1 && newYdisp < ybase) {
+          term.scrollToBottom()
+        }
+        prevYdisp = newYdisp
+      })
+
       term.open(container)
       try {
         fit.fit()
