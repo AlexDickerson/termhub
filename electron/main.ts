@@ -9,6 +9,14 @@ import { startMcpServer, type McpHandle } from './mcp'
 import { isAllowedExternalUrl } from './links'
 import { watchSessionStatus, type WatcherHandle, type SessionStatus } from './status-watcher'
 
+// Isolate dev builds so their sessions, config, and MCP port don't bleed into
+// the production instance running alongside. Must be called before the first
+// app.getPath('userData') use (which happens inside app.whenReady callbacks).
+if (!app.isPackaged) {
+  app.setPath('userData', path.join(app.getPath('userData'), '..', 'termhub-dev'))
+  console.log('[termhub] dev mode — userData:', app.getPath('userData'))
+}
+
 type Session = {
   id: string
   cwd: string
@@ -161,7 +169,9 @@ type PersistedSession = {
 }
 
 const DEFAULT_CONFIG: Config = {
-  mcpPort: 7787,
+  // Dev builds get port 7788 so they don't conflict with the production
+  // instance on 7787 when both are running at the same time.
+  mcpPort: app.isPackaged ? 7787 : 7788,
   // bypassPermissions skips per-tool approval prompts AND avoids the
   // sandbox preflight that "auto" mode triggers — without an override the
   // orchestrator session refuses to start when ~/.claude/settings.json
