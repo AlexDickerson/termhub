@@ -35,12 +35,48 @@ export function parseSessionStatus(content: string): string | undefined {
   return undefined
 }
 
+// Encode a filesystem path the same way Claude Code does when building the
+// ~/.claude/projects/<encoded-cwd>/ directory name. Each backslash, forward
+// slash, colon, or dot is replaced with a dash.
+export function encodeProjectPath(cwdArg: string): string {
+  return cwdArg.replace(/[\\/:\.]/g, '-')
+}
+
+const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects')
 const SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions')
 
-// Scan ~/.claude/sessions/ for a .json file whose `cwd` matches the given cwd
-// and whose `startedAt` is within the expected window around spawnedAt.
-// Returns the full file path, or null if no match is found.
-export function findSessionFile(cwd: string, spawnedAt: number): string | null {
+// Find the session ID of the most recently active Claude Code session in the
+// given cwd. Claude Code writes one JSONL file per session under
+// ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl, appending records as the
+// session progresses. The most recently modified file is the active session.
+// Returns the session ID (UUID string) or null if the directory is absent or empty.
+export function findActiveSessionId(cwd: string): string | null {
+  const dir = path.join(PROJECTS_DIR, encodeProjectPath(cwd))
+  let files: string[]
+  try {
+    files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'))
+  } catch {
+    return null
+  }
+  if (files.length === 0) return null
+
+  let best: { stem: string; mtime: number } | null = null
+  for (const file of files) {
+    try {
+      const stat = fs.statSync(path.join(dir, file))
+      if (!best || stat.mtimeMs > best.mtime) {
+        best = { stem: path.basename(file, '.jsonl'), mtime: stat.mtimeMs }
+      }
+    } catch {
+      // file gone between readdir and stat — skip
+    }
+  }
+  return best?.stem ?? null
+}
+
+// Find the ~/.claude/sessions/<pid>.json file whose `sessionId` field matches
+// the given session ID. Returns the full path or null if not found.
+export function findSessionFileBySessionId(sessionId: string): string | null {
   let files: string[]
   try {
     files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'))
@@ -48,74 +84,68 @@ export function findSessionFile(cwd: string, spawnedAt: number): string | null {
     return null
   }
 
-  // Normalise + lowercase for case-insensitive Windows path comparison.
-  const normCwd = path.normalize(cwd).toLowerCase()
-
-  // Allow the session file to have been created up to 5 min before our spawn
-  // (clock skew / race) or any time after.
-  const LOOKBACK_MS = 5 * 60 * 1000
-
-  let best: { filePath: string; startedAt: number } | null = null
-
   for (const file of files) {
     const filePath = path.join(SESSIONS_DIR, file)
     try {
       const content = fs.readFileSync(filePath, 'utf8')
       const rec = JSON.parse(content) as Record<string, unknown>
-      if (typeof rec.cwd !== 'string') continue
-      if (path.normalize(rec.cwd).toLowerCase() !== normCwd) continue
-      if (typeof rec.startedAt !== 'number') continue
-      if (rec.startedAt < spawnedAt - LOOKBACK_MS) continue
-      if (!best || rec.startedAt > best.startedAt) {
-        best = { filePath, startedAt: rec.startedAt }
-      }
+      if (rec.sessionId === sessionId) return filePath
     } catch {
       // unparseable or gone — skip
     }
   }
-
-  return best?.filePath ?? null
+  return null
 }
 
 export type WatcherHandle = {
   stop: () => void
 }
 
-// Watch the status of a Claude Code session by polling ~/.claude/sessions/
-// for a JSON file matching the session's cwd.
+// Watch the status of a Claude Code session by:
+//   1. Finding the active session ID via ~/.claude/projects/<encoded-cwd>/*.jsonl
+//      (the most recently modified file is the active session; its filename is
+//      the session ID).
+//   2. Finding the corresponding ~/.claude/sessions/<pid>.json by sessionId match.
+//   3. Polling that file every 500 ms and emitting mapped status on change.
 //
-// Claude Code writes ~/.claude/sessions/<pid>.json — a single JSON object
-// rewritten in-place on every status change. The file is named by Claude's
-// own PID (not termhub's session ID), so we discover it by cwd match.
+// Before the session file appears (Claude Code creates it shortly after startup),
+// status stays at 'working' — we optimistically assume busy until the file says
+// otherwise.
 //
-// Before the file appears (Claude Code creates it shortly after startup),
-// status stays at 'working' — we optimistically assume busy until the file
-// says otherwise.
-//
-// Returns a handle with a stop() method to tear down the watcher.
+// If the file disappears (session ended / pid reused), the watcher re-discovers
+// the active session on the next tick.
 export function watchSessionStatus(
   cwd: string,
   onStatus: (status: SessionStatus) => void,
 ): WatcherHandle {
-  const spawnedAt = Date.now()
   let stopped = false
   let watchedPath: string | null = null
+  let watchedSessionId: string | null = null
   let lastEmitted: SessionStatus | undefined
 
   function poll() {
     if (stopped) return
 
-    // Discover the session file if we haven't yet.
+    // Discover (or re-discover) the session file if not yet found.
     if (!watchedPath) {
-      watchedPath = findSessionFile(cwd, spawnedAt)
-      if (watchedPath) {
-        console.log('[termhub:status] found session file for', path.basename(cwd), 'at', watchedPath)
+      const sessionId = findActiveSessionId(cwd)
+      if (sessionId && sessionId !== watchedSessionId) {
+        const filePath = findSessionFileBySessionId(sessionId)
+        if (filePath) {
+          watchedPath = filePath
+          watchedSessionId = sessionId
+          console.log(
+            '[termhub:status] found session file (id=%s) at %s',
+            sessionId.slice(0, 8),
+            filePath,
+          )
+        }
       }
     }
 
     if (!watchedPath) return
 
-    // Read the current status from the file (whole file — it's a single JSON object).
+    // Read the current status from the file (whole file — single JSON object).
     try {
       const content = fs.readFileSync(watchedPath, 'utf8')
       const raw = parseSessionStatus(content)
@@ -129,7 +159,7 @@ export function watchSessionStatus(
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
         console.error('[termhub:status] failed to read session file', watchedPath, err)
       }
-      // File gone — reset so we re-scan next tick
+      // File gone — reset so we re-discover on the next tick.
       watchedPath = null
     }
   }
