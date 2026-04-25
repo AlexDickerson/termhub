@@ -9,6 +9,14 @@ import { BottomTerminal } from './BottomTerminal'
 import { RightPanel } from './RightPanel'
 import { UsageModal } from './UsageModal'
 import type { Session, SessionStatus } from './types'
+import {
+  clampHeight,
+  readPersistedHeight,
+  BOTTOM_MIN_HEIGHT,
+  BOTTOM_MAX_FRACTION,
+  BOTTOM_DEFAULT_HEIGHT,
+  BOTTOM_HEIGHT_STORAGE_KEY,
+} from './layout'
 
 export type TerminalEntry = { term: Terminal; fit: FitAddon; linksAddon?: WebLinksAddon }
 
@@ -24,6 +32,19 @@ export default function App() {
   // keyed by the same session id, but wired to the shell PTY channel.
   const shellTermsRef = useRef(new Map<string, TerminalEntry>())
   const shellPendingDataRef = useRef(new Map<string, string[]>())
+
+  // Bottom terminal height — persisted across restarts via localStorage.
+  const [bottomHeight, setBottomHeight] = useState<number>(() =>
+    readPersistedHeight(BOTTOM_DEFAULT_HEIGHT),
+  )
+  // Ref so the mousemove handler always reads the latest height without needing
+  // to be re-registered on every height change.
+  const bottomHeightRef = useRef(bottomHeight)
+  // The container that holds .main-top + divider + .main-bottom. We need its
+  // bounding rect to compute the max allowed height during drag.
+  const mainContainerRef = useRef<HTMLElement>(null)
+  // isDragging is a ref (not state) to avoid re-renders during drag.
+  const isDraggingRef = useRef(false)
 
   useEffect(() => {
     const offData = window.termhub.onData((id, data) => {
@@ -174,6 +195,51 @@ export default function App() {
     }
   }, [])
 
+  // Keep ref in sync with state so the mousemove closure always sees the
+  // latest value without needing to be re-registered.
+  useEffect(() => {
+    bottomHeightRef.current = bottomHeight
+  }, [bottomHeight])
+
+  const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    isDraggingRef.current = true
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+    console.info('[termhub:layout] drag start, height before:', bottomHeightRef.current)
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isDraggingRef.current) return
+      const container = mainContainerRef.current
+      if (!container) return
+      const rect = container.getBoundingClientRect()
+      // Height = distance from mouse Y to the bottom of the container.
+      const raw = rect.bottom - ev.clientY
+      const clamped = clampHeight(raw, BOTTOM_MIN_HEIGHT, BOTTOM_MAX_FRACTION, rect.height)
+      setBottomHeight(clamped)
+      bottomHeightRef.current = clamped
+    }
+
+    const onMouseUp = () => {
+      isDraggingRef.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+      const finalHeight = bottomHeightRef.current
+      console.info('[termhub:layout] drag end, final height:', finalHeight)
+      // Persist the chosen height.
+      try {
+        localStorage.setItem(BOTTOM_HEIGHT_STORAGE_KEY, String(finalHeight))
+      } catch {
+        // localStorage may be unavailable in some environments
+      }
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+  }, [])
+
   // Refit both terminals for the active session when the window resizes.
   useEffect(() => {
     const onResize = () => {
@@ -244,7 +310,7 @@ export default function App() {
           onClose={closeSession}
           onRename={renameSession}
         />
-        <main className="main">
+        <main className="main" ref={mainContainerRef}>
           {sessions.length === 0 ? (
             <div className="empty">
               <p>No sessions yet.</p>
@@ -263,8 +329,8 @@ export default function App() {
                   />
                 ))}
               </div>
-              <div className="main-divider" />
-              <div className="main-bottom">
+              <div className="main-divider" onMouseDown={handleDividerMouseDown} />
+              <div className="main-bottom" style={{ flexBasis: bottomHeight }}>
                 {sessions.map((s) => (
                   <BottomTerminal
                     key={s.id}
