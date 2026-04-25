@@ -6,6 +6,7 @@ import * as fs from 'node:fs'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { startMcpServer, type McpHandle } from './mcp'
+import { isAllowedExternalUrl } from './links'
 
 // Advisory status derived from the session's output stream. Mirrors the
 // SessionStatus union exposed to the renderer in src/types.ts.
@@ -1054,6 +1055,18 @@ app.whenReady().then(async () => {
 
   ipcMain.on('clipboard:write', (_event, text: string) => {
     clipboard.writeText(text)
+  })
+
+  ipcMain.on('open-external', (_event, url: string) => {
+    if (isAllowedExternalUrl(url)) {
+      shell.openExternal(url)
+    } else {
+      try {
+        console.warn('[termhub:links] rejected openExternal with disallowed scheme:', new URL(url).protocol)
+      } catch {
+        console.warn('[termhub:links] rejected openExternal with malformed URL:', url)
+      }
+    }
   })
 
   // Window controls — invoked from the custom title bar.

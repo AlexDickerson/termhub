@@ -1,6 +1,7 @@
 import { useEffect, useRef, type MutableRefObject } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import type { Session } from './types'
 import type { TerminalEntry } from './App'
 
@@ -75,6 +76,11 @@ export function BottomTerminal({
       const fit = new FitAddon()
       term.loadAddon(fit)
 
+      const linksAddon = new WebLinksAddon((_event, uri) => {
+        window.termhub.openExternal(uri)
+      })
+      term.loadAddon(linksAddon)
+
       term.attachCustomKeyEventHandler((e) => {
         if (e.type !== 'keydown' || !e.ctrlKey) return true
         const isC = e.code === 'KeyC'
@@ -130,7 +136,7 @@ export function BottomTerminal({
 
       window.termhub.resizeShell(session.id, term.cols, term.rows)
 
-      termsRef.current.set(session.id, { term, fit })
+      termsRef.current.set(session.id, { term, fit, linksAddon })
 
       const queue = pendingDataRef.current.get(session.id)
       if (queue && queue.length > 0) {
@@ -187,6 +193,7 @@ export function BottomTerminal({
     return () => {
       const entry = termsRef.current.get(session.id)
       if (entry) {
+        entry.linksAddon?.dispose()
         entry.term.dispose()
         termsRef.current.delete(session.id)
       }
