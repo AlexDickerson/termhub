@@ -144,9 +144,10 @@ export function BottomTerminal({
 
   return (
     <div
-      ref={containerRef}
-      className="terminal-container"
-      style={{ display: isActive ? 'block' : 'none' }}
-    />
+      className="terminal-pane"
+      style={{ display: isActive ? 'flex' : 'none' }}
+    >
+      <div ref={containerRef} className="terminal-container" />
+    </div>
   )
 }
