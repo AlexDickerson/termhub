@@ -23,6 +23,7 @@ export type Config = {
     command?: string
     prompt?: string
     agent?: string
+    model?: string
   }>
 }
 

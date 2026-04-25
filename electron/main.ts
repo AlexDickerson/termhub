@@ -18,6 +18,7 @@ type StartupSession = {
   command?: string
   prompt?: string
   agent?: string
+  model?: string
 }
 
 type Config = {
@@ -235,17 +236,24 @@ function quoteForCmd(s: string): string {
 function buildClaudeCommand(opts: {
   sessionId: string
   agent?: string
+  model?: string
   userPrompt?: string
   resume?: boolean
 }): string {
   const flags: string[] = [`--mcp-config "${mcpConfigPath}"`]
   if (opts.resume) {
     flags.push(`--resume "${opts.sessionId}"`)
+    if (opts.model && opts.model.length > 0) {
+      flags.push(`--model "${opts.model}"`)
+    }
     return `claude ${flags.join(' ')}`
   }
   flags.push(`--session-id "${opts.sessionId}"`)
   if (opts.agent && opts.agent.length > 0) {
     flags.push(`--agent "${opts.agent}"`)
+  }
+  if (opts.model && opts.model.length > 0) {
+    flags.push(`--model "${opts.model}"`)
   }
   let cmd = `claude ${flags.join(' ')}`
   if (opts.userPrompt && opts.userPrompt.length > 0) {
@@ -268,6 +276,7 @@ function createSessionInternal(opts: {
   command?: string
   prompt?: string
   agent?: string
+  model?: string
   source: 'ipc' | 'mcp' | 'startup' | 'resume'
 }): { id: string; cwd: string } {
   const id = opts.id ?? randomUUID()
@@ -315,6 +324,7 @@ function createSessionInternal(opts: {
       finalCommand = buildClaudeCommand({
         sessionId: id,
         agent: opts.source !== 'resume' ? opts.agent : undefined,
+        model: opts.model,
         userPrompt: opts.source !== 'resume' ? opts.prompt : undefined,
         resume: opts.source === 'resume',
       })
@@ -417,6 +427,7 @@ function bootstrapSessions(config: Config) {
         command: entry.command,
         prompt: entry.prompt,
         agent: entry.agent,
+        model: entry.model,
         source: 'startup',
       })
       occupiedCwds.add(entry.cwd)
@@ -434,12 +445,13 @@ app.whenReady().then(async () => {
     mcpHandle = await startMcpServer({
       port: config.mcpPort,
       hooks: {
-        openClaudeSession: ({ cwd, prompt, agent }) =>
+        openClaudeSession: ({ cwd, prompt, agent, model }) =>
           createSessionInternal({
             cwd,
             command: 'claude',
             prompt,
             agent,
+            model,
             source: 'mcp',
           }),
       },

@@ -12,6 +12,7 @@ export type McpHooks = {
     cwd: string
     prompt?: string
     agent?: string
+    model?: string
   }) => OpenSessionResult
 }
 
@@ -53,7 +54,12 @@ export async function startMcpServer(opts: {
       req.method === 'POST'
     ) {
       const body = await readBody(req).catch(() => '')
-      let parsed: { cwd?: unknown; prompt?: unknown; agent?: unknown }
+      let parsed: {
+        cwd?: unknown
+        prompt?: unknown
+        agent?: unknown
+        model?: unknown
+      }
       try {
         parsed = body ? JSON.parse(body) : {}
       } catch (err) {
@@ -66,8 +72,9 @@ export async function startMcpServer(opts: {
       }
       const prompt = typeof parsed.prompt === 'string' ? parsed.prompt : undefined
       const agent = typeof parsed.agent === 'string' ? parsed.agent : undefined
+      const model = typeof parsed.model === 'string' ? parsed.model : undefined
       try {
-        const result = opts.hooks.openClaudeSession({ cwd: parsed.cwd, prompt, agent })
+        const result = opts.hooks.openClaudeSession({ cwd: parsed.cwd, prompt, agent, model })
         respondJson(res, 200, result)
       } catch (err) {
         respondJson(res, 500, {

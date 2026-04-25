@@ -42,8 +42,15 @@ async function main() {
           .string()
           .optional()
           .describe(
-            'Name of an agent definition (filename in ~/.claude/agents/ without .md). When provided, ' +
-              "the agent's system prompt is prepended to the first user message so the new session adopts that role.",
+            'Name of an agent definition (filename in ~/.claude/agents/ without .md). ' +
+              'Passed to claude as --agent so the new session adopts that role.',
+          ),
+        model: z
+          .string()
+          .optional()
+          .describe(
+            'Model to use for the new session, e.g. "claude-opus-4-7" or "claude-sonnet-4-6". ' +
+              'Passed to claude as --model. Omit to use the user\'s default.',
           ),
       },
     },
@@ -52,7 +59,12 @@ async function main() {
         const response = await fetch(`${baseUrl}/internal/open_session`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cwd: args.cwd, prompt: args.prompt, agent: args.agent }),
+          body: JSON.stringify({
+            cwd: args.cwd,
+            prompt: args.prompt,
+            agent: args.agent,
+            model: args.model,
+          }),
         })
         if (!response.ok) {
           const text = await response.text().catch(() => '')
