@@ -8,7 +8,21 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 export type OpenSessionResult = { id: string; cwd: string }
 
 export type McpHooks = {
-  openClaudeSession: (req: { cwd: string; prompt?: string }) => OpenSessionResult
+  openClaudeSession: (req: {
+    cwd: string
+    prompt?: string
+    agent?: string
+    model?: string
+    dangerouslySkipPermissions?: boolean
+  }) => OpenSessionResult
+  sendInput: (req: { sessionId: string; text: string }) => {
+    ok: boolean
+    error?: string
+  }
+  readOutput: (req: { sessionId: string; maxChars?: number; raw?: boolean }) => {
+    text?: string
+    error?: string
+  }
 }
 
 export type McpHandle = {
@@ -49,7 +63,13 @@ export async function startMcpServer(opts: {
       req.method === 'POST'
     ) {
       const body = await readBody(req).catch(() => '')
-      let parsed: { cwd?: unknown; prompt?: unknown }
+      let parsed: {
+        cwd?: unknown
+        prompt?: unknown
+        agent?: unknown
+        model?: unknown
+        dangerouslySkipPermissions?: unknown
+      }
       try {
         parsed = body ? JSON.parse(body) : {}
       } catch (err) {
@@ -61,8 +81,20 @@ export async function startMcpServer(opts: {
         return
       }
       const prompt = typeof parsed.prompt === 'string' ? parsed.prompt : undefined
+      const agent = typeof parsed.agent === 'string' ? parsed.agent : undefined
+      const model = typeof parsed.model === 'string' ? parsed.model : undefined
+      const dangerouslySkipPermissions =
+        typeof parsed.dangerouslySkipPermissions === 'boolean'
+          ? parsed.dangerouslySkipPermissions
+          : undefined
       try {
-        const result = opts.hooks.openClaudeSession({ cwd: parsed.cwd, prompt })
+        const result = opts.hooks.openClaudeSession({
+          cwd: parsed.cwd,
+          prompt,
+          agent,
+          model,
+          dangerouslySkipPermissions,
+        })
         respondJson(res, 200, result)
       } catch (err) {
         respondJson(res, 500, {
@@ -70,6 +102,50 @@ export async function startMcpServer(opts: {
           detail: err instanceof Error ? err.message : String(err),
         })
       }
+      return
+    }
+
+    if (req.url === '/internal/send_input' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => '')
+      let parsed: { sessionId?: unknown; text?: unknown }
+      try {
+        parsed = body ? JSON.parse(body) : {}
+      } catch (err) {
+        respondJson(res, 400, { error: 'invalid_json', detail: String(err) })
+        return
+      }
+      if (typeof parsed.sessionId !== 'string' || typeof parsed.text !== 'string') {
+        respondJson(res, 400, { error: 'sessionId and text must be strings' })
+        return
+      }
+      const result = opts.hooks.sendInput({
+        sessionId: parsed.sessionId,
+        text: parsed.text,
+      })
+      respondJson(res, result.ok ? 200 : 400, result)
+      return
+    }
+
+    if (req.url === '/internal/read_output' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => '')
+      let parsed: { sessionId?: unknown; maxChars?: unknown; raw?: unknown }
+      try {
+        parsed = body ? JSON.parse(body) : {}
+      } catch (err) {
+        respondJson(res, 400, { error: 'invalid_json', detail: String(err) })
+        return
+      }
+      if (typeof parsed.sessionId !== 'string') {
+        respondJson(res, 400, { error: 'sessionId must be a string' })
+        return
+      }
+      const result = opts.hooks.readOutput({
+        sessionId: parsed.sessionId,
+        maxChars:
+          typeof parsed.maxChars === 'number' ? parsed.maxChars : undefined,
+        raw: typeof parsed.raw === 'boolean' ? parsed.raw : undefined,
+      })
+      respondJson(res, result.error ? 400 : 200, result)
       return
     }
 

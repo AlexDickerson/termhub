@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, clipboard } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, clipboard, shell } from 'electron'
 import * as pty from '@lydell/node-pty'
 import * as path from 'node:path'
 import * as os from 'node:os'
@@ -9,19 +9,75 @@ import { startMcpServer, type McpHandle } from './mcp'
 type Session = {
   id: string
   cwd: string
+  command?: string
   term: pty.IPty
+  outputBuffer: string
 }
 
-type StartupSession = { cwd: string; command?: string; prompt?: string }
+const MAX_OUTPUT_BUFFER_BYTES = 256 * 1024
+
+function appendToBuffer(buf: string, chunk: string): string {
+  const combined = buf + chunk
+  if (combined.length <= MAX_OUTPUT_BUFFER_BYTES) return combined
+  return combined.slice(combined.length - MAX_OUTPUT_BUFFER_BYTES)
+}
+
+// Lossy but adequate ANSI/control-char stripper for read_output. Captures
+// CSI/OSC/DCS sequences and stray control bytes; doesn't replay cursor
+// movement, so heavy TUI output (e.g. claude's input box) won't reconstruct
+// perfectly — but plain text and message bodies come through cleanly.
+function stripAnsi(s: string): string {
+  return s
+    .replace(/\x1b\[[\d;?]*[a-zA-Z]/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1b[PX^_][\s\S]*?\x1b\\/g, '')
+    .replace(/\x1b[=>()*+\-.\/]./g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+}
+
+type FindSessionResult =
+  | { found: true; session: Session }
+  | { found: false; error: string }
+
+function findSessionByIdOrPrefix(idOrPrefix: string): FindSessionResult {
+  const direct = sessions.get(idOrPrefix)
+  if (direct) return { found: true, session: direct }
+  const matches = Array.from(sessions.values()).filter((s) =>
+    s.id.startsWith(idOrPrefix),
+  )
+  if (matches.length === 1) return { found: true, session: matches[0] }
+  if (matches.length === 0) {
+    return { found: false, error: `No session found for "${idOrPrefix}"` }
+  }
+  return {
+    found: false,
+    error: `Ambiguous prefix "${idOrPrefix}" — matches ${matches.length} sessions`,
+  }
+}
+
+type StartupSession = {
+  cwd: string
+  command?: string
+  prompt?: string
+  agent?: string
+  model?: string
+  dangerouslySkipPermissions?: boolean
+}
 
 type Config = {
   mcpPort: number
   startupSessions: StartupSession[]
 }
 
+type PersistedSession = {
+  id: string
+  cwd: string
+  command?: string
+}
+
 const DEFAULT_CONFIG: Config = {
   mcpPort: 7787,
-  startupSessions: [{ cwd: 'E:/', command: 'claude' }],
+  startupSessions: [{ cwd: 'E:/', command: 'claude', agent: 'orchestrator' }],
 }
 
 const sessions = new Map<string, Session>()
@@ -35,6 +91,126 @@ function getConfigPath(): string {
 
 function getMcpConfigPath(): string {
   return path.join(app.getPath('userData'), 'mcp-config.json')
+}
+
+function getSessionsPath(): string {
+  return path.join(app.getPath('userData'), 'sessions.json')
+}
+
+function loadPersistedSessions(): PersistedSession[] {
+  try {
+    const raw = fs.readFileSync(getSessionsPath(), 'utf8')
+    const arr = JSON.parse(raw)
+    if (!Array.isArray(arr)) return []
+    return arr.filter(
+      (s): s is PersistedSession =>
+        s != null &&
+        typeof s.id === 'string' &&
+        typeof s.cwd === 'string' &&
+        (s.command === undefined || typeof s.command === 'string'),
+    )
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.error('[termhub] failed to load persisted sessions:', err)
+    }
+    return []
+  }
+}
+
+function getAgentsDir(): string {
+  return path.join(os.homedir(), '.claude', 'agents')
+}
+
+function getSkillsDir(): string {
+  return path.join(os.homedir(), '.claude', 'skills')
+}
+
+type AgentDef = { name: string; path: string; description?: string }
+
+function listAgents(): AgentDef[] {
+  const dir = getAgentsDir()
+  let entries: string[]
+  try {
+    entries = fs.readdirSync(dir)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
+    console.error('[termhub] failed to list agents:', err)
+    return []
+  }
+  const out: AgentDef[] = []
+  for (const entry of entries) {
+    if (!entry.toLowerCase().endsWith('.md')) continue
+    const filePath = path.join(dir, entry)
+    let stat
+    try {
+      stat = fs.statSync(filePath)
+    } catch {
+      continue
+    }
+    if (!stat.isFile()) continue
+    const name = entry.replace(/\.md$/i, '')
+    const description = parseAgentDescription(filePath)
+    out.push({ name, path: filePath, description })
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name))
+  return out
+}
+
+function parseAgentDescription(filePath: string): string | undefined {
+  try {
+    const content = fs.readFileSync(filePath, 'utf8')
+    const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content)
+    if (!m) return undefined
+    const desc = /^description:\s*(.+)$/im.exec(m[1])
+    if (!desc) return undefined
+    return desc[1].trim().replace(/^["']|["']$/g, '')
+  } catch {
+    return undefined
+  }
+}
+
+type SkillDef = { name: string; path: string; description?: string }
+
+function listSkills(): SkillDef[] {
+  const dir = getSkillsDir()
+  let entries: fs.Dirent[]
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
+    console.error('[termhub] failed to list skills:', err)
+    return []
+  }
+  const out: SkillDef[] = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const skillMdPath = path.join(dir, entry.name, 'SKILL.md')
+    let stat
+    try {
+      stat = fs.statSync(skillMdPath)
+    } catch {
+      continue
+    }
+    if (!stat.isFile()) continue
+    const description = parseAgentDescription(skillMdPath)
+    out.push({ name: entry.name, path: skillMdPath, description })
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name))
+  return out
+}
+
+function persistSessions() {
+  const list: PersistedSession[] = Array.from(sessions.values()).map((s) => ({
+    id: s.id,
+    cwd: s.cwd,
+    command: s.command,
+  }))
+  try {
+    fs.mkdirSync(path.dirname(getSessionsPath()), { recursive: true })
+    fs.writeFileSync(getSessionsPath(), JSON.stringify(list, null, 2))
+  } catch (err) {
+    console.error('[termhub] failed to persist sessions:', err)
+  }
 }
 
 function loadConfig(): Config {
@@ -87,31 +263,78 @@ function writeMcpConfigFile(port: number): string {
   return configPath
 }
 
-function injectMcpConfig(rawCommand: string): string {
-  const trimmed = rawCommand.trim()
-  // Match `claude` as the leading word (with or without trailing args)
-  const m = /^claude(?:\s+([\s\S]*))?$/.exec(trimmed)
-  if (!m) return rawCommand
-  const args = m[1]
-  const flag = `--mcp-config "${mcpConfigPath}"`
-  return args ? `claude ${flag} ${args}` : `claude ${flag}`
+function isClaudeCommand(cmd: string): boolean {
+  return /^claude(\s|$)/.test(cmd.trim())
 }
+
+function buildClaudeCommand(opts: {
+  sessionId: string
+  agent?: string
+  model?: string
+  resume?: boolean
+  dangerouslySkipPermissions?: boolean
+}): string {
+  const flags: string[] = [`--mcp-config "${mcpConfigPath}"`]
+  if (opts.resume) {
+    flags.push(`--resume "${opts.sessionId}"`)
+    if (opts.model && opts.model.length > 0) {
+      flags.push(`--model "${opts.model}"`)
+    }
+    if (opts.dangerouslySkipPermissions) {
+      flags.push('--dangerously-skip-permissions')
+    }
+    return `claude ${flags.join(' ')}`
+  }
+  flags.push(`--session-id "${opts.sessionId}"`)
+  if (opts.agent && opts.agent.length > 0) {
+    flags.push(`--agent "${opts.agent}"`)
+  }
+  if (opts.model && opts.model.length > 0) {
+    flags.push(`--model "${opts.model}"`)
+  }
+  if (opts.dangerouslySkipPermissions) {
+    flags.push('--dangerously-skip-permissions')
+  }
+  return `claude ${flags.join(' ')}`
+}
+
+// Wrap text in bracketed-paste markers + Enter. Claude's TUI (Ink) handles
+// bracketed paste atomically, so arbitrarily long / shell-special content
+// can be injected without cmd.exe seeing or trying to parse it.
+function bracketedPasteWithSubmit(text: string): string {
+  return `\x1b[200~${text}\x1b[201~\r`
+}
+
+// CLAUDE_* / CLAUDECODE / similar vars from a parent claude session leak
+// into spawned child claudes and confuse them — e.g.
+// CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1 trips the sandbox preflight and
+// makes claude refuse to start. Always strip these so the child boots
+// from a clean baseline.
+const PARENT_CLAUDE_ENV_PREFIXES = ['CLAUDE_', 'CLAUDECODE']
+const PARENT_CLAUDE_ENV_EXACT = new Set(['DEFAULT_LLM_MODEL'])
 
 function cleanEnv(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
-    if (typeof v === 'string') out[k] = v
+    if (typeof v !== 'string') continue
+    if (PARENT_CLAUDE_ENV_EXACT.has(k)) continue
+    if (PARENT_CLAUDE_ENV_PREFIXES.some((p) => k.startsWith(p))) continue
+    out[k] = v
   }
   return out
 }
 
 function createSessionInternal(opts: {
+  id?: string
   cwd: string
   command?: string
   prompt?: string
-  source: 'ipc' | 'mcp' | 'startup'
+  agent?: string
+  model?: string
+  dangerouslySkipPermissions?: boolean
+  source: 'ipc' | 'mcp' | 'startup' | 'resume'
 }): { id: string; cwd: string } {
-  const id = randomUUID()
+  const id = opts.id ?? randomUUID()
   const shell = process.env.COMSPEC || 'cmd.exe'
   console.log(
     `[termhub] spawning ${shell} in ${opts.cwd} (id=${id.slice(0, 8)}, source=${opts.source})`,
@@ -131,12 +354,23 @@ function createSessionInternal(opts: {
   }
   console.log(`[termhub] pty.spawn returned (pid=${term.pid})`)
 
+  const session: Session = {
+    id,
+    cwd: opts.cwd,
+    command: opts.command,
+    term,
+    outputBuffer: '',
+  }
+  sessions.set(id, session)
+  persistSessions()
+
   let firstData = true
   term.onData((data) => {
     if (firstData) {
       firstData = false
       console.log(`[termhub] first data from ${id.slice(0, 8)} (${data.length} bytes)`)
     }
+    session.outputBuffer = appendToBuffer(session.outputBuffer, data)
     mainWindow?.webContents.send('session:data', { id, data })
   })
 
@@ -144,27 +378,47 @@ function createSessionInternal(opts: {
     console.log(`[termhub] session ${id.slice(0, 8)} exited (code=${exitCode})`)
     mainWindow?.webContents.send('session:exit', { id, exitCode })
     sessions.delete(id)
+    persistSessions()
   })
 
-  sessions.set(id, { id, cwd: opts.cwd, term })
-
   if (opts.command && opts.command.trim().length > 0) {
-    const finalCommand = injectMcpConfig(opts.command)
+    let finalCommand: string
+    if (isClaudeCommand(opts.command)) {
+      finalCommand = buildClaudeCommand({
+        sessionId: id,
+        agent: opts.source !== 'resume' ? opts.agent : undefined,
+        model: opts.model,
+        dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+        resume: opts.source === 'resume',
+      })
+    } else {
+      finalCommand = opts.command
+    }
     setTimeout(() => {
       if (sessions.has(id)) term.write(`${finalCommand}\r`)
     }, 150)
   }
 
-  if (opts.prompt && opts.prompt.length > 0) {
-    // Wait for the launched program (claude) to be ready to accept input
-    const sanitized = opts.prompt.replace(/\r?\n/g, ' ')
+  // Send the prompt to claude's TUI as a bracketed paste, after it's had
+  // time to start. This avoids cmd.exe's quoting limits for prompts with
+  // embedded quotes, backticks, $(), <>, etc.
+  if (opts.source !== 'resume' && opts.prompt && opts.prompt.length > 0) {
+    const text = opts.prompt
     setTimeout(() => {
-      if (sessions.has(id)) term.write(`${sanitized}\r`)
+      if (sessions.has(id)) {
+        session.term.write(bracketedPasteWithSubmit(text))
+      }
     }, 2500)
   }
 
-  if (opts.source === 'mcp') {
-    mainWindow?.webContents.send('session:added', { id, cwd: opts.cwd })
+  if (opts.source !== 'ipc') {
+    const autoActivate = opts.source === 'startup' || opts.source === 'resume'
+    mainWindow?.webContents.send('session:added', {
+      id,
+      cwd: opts.cwd,
+      command: opts.command,
+      autoActivate,
+    })
   }
 
   return { id, cwd: opts.cwd }
@@ -210,6 +464,55 @@ function killAllSessions() {
   sessions.clear()
 }
 
+// Renderer signals readiness via 'app:ready' once it has subscribed to
+// session:data / session:added / session:exit. We defer creating the
+// startup + resume sessions until after that, otherwise early pty output
+// would be sent before any listener exists.
+let rendererReadyResolve: (() => void) | null = null
+const rendererReady = new Promise<void>((resolve) => {
+  rendererReadyResolve = resolve
+})
+
+function bootstrapSessions(config: Config) {
+  const persisted = loadPersistedSessions()
+  const occupiedCwds = new Set<string>()
+
+  for (const s of persisted) {
+    try {
+      createSessionInternal({
+        id: s.id,
+        cwd: s.cwd,
+        command: s.command,
+        source: 'resume',
+      })
+      occupiedCwds.add(s.cwd)
+    } catch (err) {
+      console.error(`[termhub] failed to resume session ${s.id.slice(0, 8)}:`, err)
+    }
+  }
+
+  for (const entry of config.startupSessions) {
+    if (occupiedCwds.has(entry.cwd)) {
+      console.log(`[termhub] skipping startup entry ${entry.cwd} (resumed from persistence)`)
+      continue
+    }
+    try {
+      createSessionInternal({
+        cwd: entry.cwd,
+        command: entry.command,
+        prompt: entry.prompt,
+        agent: entry.agent,
+        model: entry.model,
+        dangerouslySkipPermissions: entry.dangerouslySkipPermissions,
+        source: 'startup',
+      })
+      occupiedCwds.add(entry.cwd)
+    } catch (err) {
+      console.error('[termhub] startup session failed for', entry.cwd, err)
+    }
+  }
+}
+
 app.whenReady().then(async () => {
   const config = loadConfig()
   mcpConfigPath = writeMcpConfigFile(config.mcpPort)
@@ -218,20 +521,53 @@ app.whenReady().then(async () => {
     mcpHandle = await startMcpServer({
       port: config.mcpPort,
       hooks: {
-        openClaudeSession: ({ cwd, prompt }) =>
+        openClaudeSession: ({ cwd, prompt, agent, model, dangerouslySkipPermissions }) =>
           createSessionInternal({
             cwd,
             command: 'claude',
             prompt,
+            agent,
+            model,
+            dangerouslySkipPermissions,
             source: 'mcp',
           }),
+        sendInput: ({ sessionId, text }) => {
+          const result = findSessionByIdOrPrefix(sessionId)
+          if (!result.found) return { ok: false, error: result.error }
+          try {
+            result.session.term.write(bracketedPasteWithSubmit(text))
+            return { ok: true }
+          } catch (err) {
+            return {
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+            }
+          }
+        },
+        readOutput: ({ sessionId, maxChars, raw }) => {
+          const result = findSessionByIdOrPrefix(sessionId)
+          if (!result.found) return { error: result.error }
+          let text = result.session.outputBuffer
+          if (!raw) text = stripAnsi(text)
+          if (typeof maxChars === 'number' && maxChars > 0 && text.length > maxChars) {
+            text = text.slice(text.length - maxChars)
+          }
+          return { text }
+        },
       },
     })
   } catch (err) {
     console.error('[termhub] failed to start MCP server:', err)
   }
 
+  ipcMain.once('app:ready', () => {
+    rendererReadyResolve?.()
+  })
+
   createWindow()
+
+  // Bootstrap once the renderer is listening
+  rendererReady.then(() => bootstrapSessions(config))
 
   ipcMain.handle(
     'session:create',
@@ -273,6 +609,40 @@ app.whenReady().then(async () => {
       // already dead
     }
     sessions.delete(payload.id)
+    persistSessions()
+  })
+
+  ipcMain.handle('sessions:list', () =>
+    Array.from(sessions.values()).map((s) => ({
+      id: s.id,
+      cwd: s.cwd,
+      command: s.command,
+    })),
+  )
+
+  ipcMain.handle('agents:list', () => listAgents())
+
+  ipcMain.handle('agents:open', async (_event, filePath: string) => {
+    // Only open files inside our agents dir, no traversal.
+    const resolved = path.resolve(filePath)
+    const agentsDir = path.resolve(getAgentsDir())
+    if (!resolved.startsWith(agentsDir + path.sep) && resolved !== agentsDir) {
+      throw new Error('Refusing to open path outside agents dir')
+    }
+    const err = await shell.openPath(resolved)
+    if (err) throw new Error(err)
+  })
+
+  ipcMain.handle('skills:list', () => listSkills())
+
+  ipcMain.handle('skills:open', async (_event, filePath: string) => {
+    const resolved = path.resolve(filePath)
+    const skillsDir = path.resolve(getSkillsDir())
+    if (!resolved.startsWith(skillsDir + path.sep) && resolved !== skillsDir) {
+      throw new Error('Refusing to open path outside skills dir')
+    }
+    const err = await shell.openPath(resolved)
+    if (err) throw new Error(err)
   })
 
   ipcMain.handle('dialog:pickFolder', async () => {
