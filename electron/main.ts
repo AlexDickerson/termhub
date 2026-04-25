@@ -93,9 +93,32 @@ function stripAnsi(s: string): string {
 // Status management
 // ---------------------------------------------------------------------------
 
+// Tracks which session ids have had at least one 'session:status' event sent
+// to the renderer. Without this, sessions whose first observed status equals
+// the initial 'working' default would never emit (the equality check below
+// would suppress a no-op transition), and the renderer would default the
+// dot to 'idle' (green) for active sessions stuck busy. Cleared in
+// killAllSessions and on session removal.
+const statusEmitted = new Set<string>()
+
+// Pure decision: should this transition produce a 'session:status' IPC
+// emission? Forces the very first emission per session id so the renderer
+// has a seeded value, then suppresses no-op (equal) transitions.
+//
+// Exported only for tests.
+export function shouldEmitStatus(
+  emitted: ReadonlySet<string>,
+  sessionId: string,
+  current: SessionStatus,
+  next: SessionStatus,
+): boolean {
+  return !emitted.has(sessionId) || current !== next
+}
+
 function setStatus(session: Session, next: SessionStatus) {
-  if (session.status === next) return
+  if (!shouldEmitStatus(statusEmitted, session.id, session.status, next)) return
   session.status = next
+  statusEmitted.add(session.id)
   mainWindow?.webContents.send('session:status', { id: session.id, status: next })
 }
 
@@ -570,6 +593,12 @@ function createSessionInternal(opts: {
   sessions.set(id, session)
   persistSessions()
 
+  // Seed the renderer with the initial status so the sidebar dot doesn't
+  // default to 'idle' (green) while the session is actually working. The
+  // first-emit force in setStatus handles cases where the first JSONL
+  // reading happens to equal the initial 'working' default.
+  setStatus(session, session.status)
+
   // Watch the Claude Code JSONL file for ground-truth status updates. The
   // file is created by Claude Code shortly after startup; the watcher polls
   // and will begin emitting once the file appears.
@@ -611,6 +640,7 @@ function createSessionInternal(opts: {
       // already dead
     }
     sessions.delete(id)
+    statusEmitted.delete(id)
     persistSessions()
   })
 
@@ -731,6 +761,7 @@ function killAllSessions() {
     }
   }
   sessions.clear()
+  statusEmitted.clear()
 }
 
 // Renderer signals readiness via 'app:ready' once it has subscribed to
@@ -901,6 +932,7 @@ app.whenReady().then(async () => {
       // already dead
     }
     sessions.delete(payload.id)
+    statusEmitted.delete(payload.id)
     persistSessions()
   })
 
