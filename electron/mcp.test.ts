@@ -3,6 +3,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { startMcpServer, type McpHooks } from './mcp'
+import { MCP_ROUTES } from './mcp-routes'
 
 const BASE_PORT = 19_876
 
@@ -51,7 +52,7 @@ describe('mcp HTTP server — error sanitization', () => {
     })
     close = handle.close
 
-    const { status, json } = await post(port, '/internal/open_session', { cwd: '/tmp' })
+    const { status, json } = await post(port, MCP_ROUTES.OPEN_SESSION, { cwd: '/tmp' })
 
     expect(status).toBe(500)
     const body = JSON.stringify(json)
@@ -69,7 +70,7 @@ describe('mcp HTTP server — error sanitization', () => {
     const handle = await startMcpServer({ port, hooks: makeHooks() })
     close = handle.close
 
-    const res = await fetch(`http://127.0.0.1:${port}/internal/open_session`, {
+    const res = await fetch(`http://127.0.0.1:${port}${MCP_ROUTES.OPEN_SESSION}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{ not valid json !!!',
@@ -89,7 +90,7 @@ describe('mcp HTTP server — error sanitization', () => {
     const handle = await startMcpServer({ port, hooks: makeHooks() })
     close = handle.close
 
-    const res = await fetch(`http://127.0.0.1:${port}/internal/send_input`, {
+    const res = await fetch(`http://127.0.0.1:${port}${MCP_ROUTES.SEND_INPUT}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '<<bad>>',
@@ -109,7 +110,7 @@ describe('mcp HTTP server — error sanitization', () => {
     const handle = await startMcpServer({ port, hooks: makeHooks() })
     close = handle.close
 
-    const res = await fetch(`http://127.0.0.1:${port}/internal/read_output`, {
+    const res = await fetch(`http://127.0.0.1:${port}${MCP_ROUTES.READ_OUTPUT}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: 'not-json',
@@ -129,7 +130,7 @@ describe('mcp HTTP server — error sanitization', () => {
     const handle = await startMcpServer({ port, hooks: makeHooks() })
     close = handle.close
 
-    const { status, json } = await post(port, '/internal/open_session', { cwd: '/tmp' })
+    const { status, json } = await post(port, MCP_ROUTES.OPEN_SESSION, { cwd: '/tmp' })
     expect(status).toBe(200)
     expect((json as { id: string }).id).toBe('test-id')
   })

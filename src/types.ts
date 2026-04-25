@@ -44,11 +44,7 @@ export type Config = {
 }
 
 export type TermhubApi = {
-  createSession: (
-    cwd: string,
-    command?: string,
-    prompt?: string,
-  ) => Promise<{ id: string; cwd: string }>
+  createSession: (cwd: string) => Promise<{ id: string; cwd: string }>
   sendInput: (id: string, data: string) => void
   resize: (id: string, cols: number, rows: number) => void
   close: (id: string) => void

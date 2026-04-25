@@ -4,6 +4,7 @@
 // MCP server, and it forwards tool calls here.
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { MCP_ROUTES } from './mcp-routes'
 
 export type OpenSessionResult = { id: string; cwd: string }
 
@@ -61,10 +62,7 @@ export async function startMcpServer(opts: {
   const httpServer = createServer(async (req, res) => {
     console.log(`[termhub:mcp] ${req.method} ${req.url}`)
 
-    if (
-      req.url === '/internal/open_session' &&
-      req.method === 'POST'
-    ) {
+    if (req.url === MCP_ROUTES.OPEN_SESSION && req.method === 'POST') {
       const body = await readBody(req).catch(() => '')
       let parsed: {
         cwd?: unknown
@@ -120,7 +118,7 @@ export async function startMcpServer(opts: {
       return
     }
 
-    if (req.url === '/internal/send_input' && req.method === 'POST') {
+    if (req.url === MCP_ROUTES.SEND_INPUT && req.method === 'POST') {
       const body = await readBody(req).catch(() => '')
       let parsed: { sessionId?: unknown; text?: unknown }
       try {
@@ -142,7 +140,7 @@ export async function startMcpServer(opts: {
       return
     }
 
-    if (req.url === '/internal/read_output' && req.method === 'POST') {
+    if (req.url === MCP_ROUTES.READ_OUTPUT && req.method === 'POST') {
       const body = await readBody(req).catch(() => '')
       let parsed: { sessionId?: unknown; maxChars?: unknown; raw?: unknown }
       try {
@@ -176,7 +174,7 @@ export async function startMcpServer(opts: {
   })
 
   const url = `http://127.0.0.1:${opts.port}`
-  console.log(`[termhub:mcp] internal HTTP API listening on ${url}/internal/open_session`)
+  console.log(`[termhub:mcp] internal HTTP API listening on ${url}${MCP_ROUTES.OPEN_SESSION}`)
 
   return {
     port: opts.port,
