@@ -37,7 +37,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: termhub-windows-installer
-          path: release/*-nsis.exe
+          path: release/*-setup.exe
           if-no-files-found: error
 
       - name: Upload portable artifact
