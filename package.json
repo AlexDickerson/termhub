@@ -20,6 +20,7 @@
   "build": {
     "appId": "com.alexdickerson.termhub",
     "productName": "TermHub",
+    "compression": "normal",
     "directories": {
       "output": "release"
     },
