@@ -2,12 +2,23 @@ import { describe, it, expect } from 'vitest'
 import { shiftEnterSequence } from './keyHandlers'
 
 describe('shiftEnterSequence', () => {
-  const MODIFIER_KEYS_CSI = '\x1b[27;2;13~'
+  // ESC+CR is the Alt+Enter sequence Claude Code's readline maps to
+  // "insert literal newline" regardless of buffer state.
+  const ESC_CR = '\x1b\r'
 
-  it('returns the modifyOtherKeys CSI sequence for Shift+Enter keydown', () => {
+  it('returns ESC+CR for Shift+Enter keydown', () => {
     expect(
       shiftEnterSequence({ type: 'keydown', shiftKey: true, key: 'Enter' }),
-    ).toBe(MODIFIER_KEYS_CSI)
+    ).toBe(ESC_CR)
+  })
+
+  it('returns ESC+CR for Ctrl+Shift+Enter keydown (shiftKey is true)', () => {
+    // Ctrl+Shift+Enter also has shiftKey=true, key='Enter'; the handler
+    // intercepts it the same way and returns false so xterm does not also
+    // emit a bare CR that would submit the buffer.
+    expect(
+      shiftEnterSequence({ type: 'keydown', shiftKey: true, key: 'Enter' }),
+    ).toBe(ESC_CR)
   })
 
   it('returns null for a plain Enter (no Shift) keydown', () => {
@@ -40,10 +51,11 @@ describe('shiftEnterSequence', () => {
     ).toBeNull()
   })
 
-  // Regression: the old sequence was \x1b\r (ESC+CR).  Verify the new
-  // sequence is different so the bug cannot silently regress.
-  it('does NOT return the old ESC+CR sequence', () => {
+  // Regression: the modifyOtherKeys CSI form (\x1b[27;2;13~) does NOT work
+  // because Claude Code never enables that terminal mode.  Ensure we are not
+  // accidentally sending it.
+  it('does NOT return the modifyOtherKeys CSI form', () => {
     const seq = shiftEnterSequence({ type: 'keydown', shiftKey: true, key: 'Enter' })
-    expect(seq).not.toBe('\x1b\r')
+    expect(seq).not.toBe('\x1b[27;2;13~')
   })
 })

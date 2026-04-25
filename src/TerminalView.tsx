@@ -76,48 +76,53 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
       const fit = new FitAddon()
       term.loadAddon(fit)
 
+      // Single handler — xterm only keeps the last registered handler, so
+      // all key interception must live in one call to attachCustomKeyEventHandler.
       term.attachCustomKeyEventHandler((e) => {
-        if (e.type !== 'keydown' || !e.ctrlKey) return true
-        const isC = e.code === 'KeyC'
-        const isV = e.code === 'KeyV'
-        if (!isC && !isV) return true
-
-        if (isC) {
-          const hasSelection = term.hasSelection()
-          if (e.shiftKey || hasSelection) {
-            const text = term.getSelection()
-            if (text) {
-              window.termhub.writeClipboard(text)
-              term.clearSelection()
-            }
-            return false
-          }
-          return true
-        }
-
-        // Prevent the browser from also firing a native 'paste' ClipboardEvent
-        // on the xterm textarea. Without this, xterm's own paste listener
-        // (registered on the textarea) fires after our term.paste() call,
-        // writing the clipboard text a second time.
-        e.preventDefault()
-        void window.termhub.readClipboard().then((text) => {
-          if (text) term.paste(text)
-        })
-        return false
-      })
-
-      // Shift+Enter: send the modifyOtherKeys CSI sequence (\x1b[27;2;13~)
-      // which Claude Code's input parser recognises as "insert newline"
-      // regardless of whether there is already text in the input buffer.
-      // The previous \x1b\r (ESC+CR / Meta+Enter) only worked when the
-      // buffer was empty because Claude Code's readline-style parser treats
-      // ESC+CR differently depending on buffered input state.
-      term.attachCustomKeyEventHandler((ev: KeyboardEvent) => {
-        const seq = shiftEnterSequence(ev)
+        // Shift+Enter → insert a literal newline in Claude Code's input buffer.
+        // We send ESC+CR (\x1b\r), which Claude Code's readline maps to
+        // "insert newline".  We return false so xterm does NOT also emit its
+        // own bytes for the key (a bare CR / Enter), which would submit the
+        // buffer.  The previous bug was returning true here, causing
+        // \x1b\r + \r to reach the PTY: harmless with empty input, but with
+        // text it submitted the buffer immediately after the newline.
+        const seq = shiftEnterSequence(e)
         if (seq !== null) {
           window.termhub.sendInput(session.id, seq)
-          return false  // suppress xterm default handling
+          return false
         }
+
+        // Ctrl+C / Ctrl+V: clipboard copy and paste.
+        if (e.type === 'keydown' && e.ctrlKey) {
+          const isC = e.code === 'KeyC'
+          const isV = e.code === 'KeyV'
+
+          if (isC) {
+            const hasSelection = term.hasSelection()
+            if (e.shiftKey || hasSelection) {
+              const text = term.getSelection()
+              if (text) {
+                window.termhub.writeClipboard(text)
+                term.clearSelection()
+              }
+              return false
+            }
+            return true
+          }
+
+          if (isV) {
+            // Prevent the browser from also firing a native 'paste' ClipboardEvent
+            // on the xterm textarea. Without this, xterm's own paste listener
+            // (registered on the textarea) fires after our term.paste() call,
+            // writing the clipboard text a second time.
+            e.preventDefault()
+            void window.termhub.readClipboard().then((text) => {
+              if (text) term.paste(text)
+            })
+            return false
+          }
+        }
+
         return true
       })
 
