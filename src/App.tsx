@@ -1,240 +1,44 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { TitleBar } from './TitleBar'
 import { Sidebar } from './Sidebar'
 import { TerminalView } from './TerminalView'
 import { BottomTerminal } from './BottomTerminal'
 import { RightPanel } from './RightPanel'
 import { UsageModal } from './UsageModal'
-import type { Session, SessionStatus } from './types'
+import type { Session } from './types'
 import type { TerminalEntry } from './useXterm'
-import {
-  clampHeight,
-  readPersistedHeight,
-  BOTTOM_MIN_HEIGHT,
-  BOTTOM_MAX_FRACTION,
-  BOTTOM_DEFAULT_HEIGHT,
-  BOTTOM_HEIGHT_STORAGE_KEY,
-} from './layout'
+import { useSessions } from './useSessions'
+import { useSplitLayout } from './useSplitLayout'
 
 export default function App() {
-  const [sessions, setSessions] = useState<Session[]>([])
-  const [statuses, setStatuses] = useState<Record<string, SessionStatus>>({})
-  const [activeId, setActiveId] = useState<string | null>(null)
-  const [showUsage, setShowUsage] = useState(false)
-  // Primary (claude) PTY xterm instances, keyed by session id.
+  // Primary (claude) PTY xterm instances, keyed by session id. Owned here
+  // because both useSessions (for dispose-on-remove) and TerminalView /
+  // BottomTerminal (for lifecycle) need to share them.
   const termsRef = useRef(new Map<string, TerminalEntry>())
   const pendingDataRef = useRef(new Map<string, string[]>())
-  // Parallel state for the docked bottom shell terminals. Same map shape,
-  // keyed by the same session id, but wired to the shell PTY channel.
+  // Parallel state for the docked bottom shell terminals.
   const shellTermsRef = useRef(new Map<string, TerminalEntry>())
   const shellPendingDataRef = useRef(new Map<string, string[]>())
 
-  // Bottom terminal height — persisted across restarts via localStorage.
-  const [bottomHeight, setBottomHeight] = useState<number>(() =>
-    readPersistedHeight(BOTTOM_DEFAULT_HEIGHT),
-  )
-  // Ref so the mousemove handler always reads the latest height without needing
-  // to be re-registered on every height change.
-  const bottomHeightRef = useRef(bottomHeight)
-  // The container that holds .main-top + divider + .main-bottom. We need its
-  // bounding rect to compute the max allowed height during drag.
-  const mainContainerRef = useRef<HTMLElement>(null)
-  // isDragging is a ref (not state) to avoid re-renders during drag.
-  const isDraggingRef = useRef(false)
+  const {
+    sessions,
+    statuses,
+    activeId,
+    setActiveId,
+    closeSession,
+    renameSession,
+    newSession,
+  } = useSessions({
+    termsRef,
+    pendingDataRef,
+    shellTermsRef,
+    shellPendingDataRef,
+  })
 
-  useEffect(() => {
-    const offData = window.termhub.onData((id, data) => {
-      const entry = termsRef.current.get(id)
-      if (entry) {
-        entry.term.write(data)
-      } else {
-        const queue = pendingDataRef.current.get(id) ?? []
-        queue.push(data)
-        pendingDataRef.current.set(id, queue)
-      }
-    })
-    const offShellData = window.termhub.onShellData((id, data) => {
-      const entry = shellTermsRef.current.get(id)
-      if (entry) {
-        entry.term.write(data)
-      } else {
-        const queue = shellPendingDataRef.current.get(id) ?? []
-        queue.push(data)
-        shellPendingDataRef.current.set(id, queue)
-      }
-    })
-    const offExit = window.termhub.onExit((id, exitCode) => {
-      // Keep failed sessions visible so the red status dot is observable.
-      // They can still be dismissed via the × button. Clean exits remove
-      // the row immediately as before.
-      if (exitCode === 0) {
-        removeSession(id)
-      }
-    })
-    const offStatus = window.termhub.onStatusChanged((id, status) => {
-      setStatuses((prev) =>
-        prev[id] === status ? prev : { ...prev, [id]: status },
-      )
-    })
-    // Shell PTY exiting independently (user typed `exit`) doesn't tear the
-    // session down — only the primary exit does. We still drop the xterm
-    // instance so a future re-init could replace it, but v1 doesn't respawn.
-    const offShellExit = window.termhub.onShellExit((id) => {
-      const entry = shellTermsRef.current.get(id)
-      if (entry) {
-        entry.term.dispose()
-        shellTermsRef.current.delete(id)
-      }
-      shellPendingDataRef.current.delete(id)
-    })
-    const offAdded = window.termhub.onSessionAdded(
-      (id, cwd, autoActivate, command, name, repoRoot, repoLabel) => {
-        setSessions((prev) =>
-          prev.some((s) => s.id === id)
-            ? prev
-            : [...prev, { id, cwd, command, name, repoRoot, repoLabel }],
-        )
-        if (autoActivate) {
-          setActiveId((curr) => curr ?? id)
-        }
-      },
-    )
+  const { bottomHeight, mainContainerRef, handleDividerMouseDown } =
+    useSplitLayout()
 
-    // Catch up with any sessions main already created (resumed/startup) before
-    // our listeners were attached, then signal that we're ready so main can
-    // create the rest.
-    void window.termhub.listSessions().then((existing) => {
-      if (existing.length > 0) {
-        setSessions((prev) => {
-          const seen = new Set(prev.map((s) => s.id))
-          return [...prev, ...existing.filter((s) => !seen.has(s.id)).map((s) => ({
-            id: s.id,
-            cwd: s.cwd,
-            command: s.command,
-            name: s.name,
-            repoRoot: s.repoRoot,
-            repoLabel: s.repoLabel,
-          }))]
-        })
-        setActiveId((curr) => curr ?? existing[0].id)
-      }
-      window.termhub.appReady()
-    })
-
-    return () => {
-      offData()
-      offShellData()
-      offExit()
-      offStatus()
-      offShellExit()
-      offAdded()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const removeSession = useCallback((id: string) => {
-    const entry = termsRef.current.get(id)
-    if (entry) {
-      entry.term.dispose()
-      termsRef.current.delete(id)
-    }
-    const shellEntry = shellTermsRef.current.get(id)
-    if (shellEntry) {
-      shellEntry.term.dispose()
-      shellTermsRef.current.delete(id)
-    }
-    shellPendingDataRef.current.delete(id)
-    setSessions((prev) => prev.filter((s) => s.id !== id))
-    setStatuses((prev) => {
-      if (!(id in prev)) return prev
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
-    setActiveId((curr) => {
-      if (curr !== id) return curr
-      // Pick the next remaining session, if any
-      const remaining = Array.from(termsRef.current.keys())
-      return remaining[0] ?? null
-    })
-  }, [])
-
-  const closeSession = useCallback(
-    (id: string) => {
-      window.termhub.close(id)
-      removeSession(id)
-    },
-    [removeSession],
-  )
-
-  const renameSession = useCallback(async (id: string, name: string) => {
-    try {
-      await window.termhub.renameSession(id, name)
-      setSessions((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, name: name.trim() || undefined } : s)),
-      )
-    } catch (err) {
-      console.error('[termhub] renameSession failed:', err)
-    }
-  }, [])
-
-  const newSession = useCallback(async () => {
-    try {
-      const cwd = await window.termhub.pickFolder()
-      if (!cwd) return
-      const s = await window.termhub.createSession(cwd)
-      setSessions((prev) => [...prev, s])
-      setActiveId(s.id)
-    } catch (err) {
-      console.error('[termhub] newSession failed:', err)
-      alert(`Failed to create session:\n${err instanceof Error ? err.message : String(err)}`)
-    }
-  }, [])
-
-  // Keep ref in sync with state so the mousemove closure always sees the
-  // latest value without needing to be re-registered.
-  useEffect(() => {
-    bottomHeightRef.current = bottomHeight
-  }, [bottomHeight])
-
-  const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    isDraggingRef.current = true
-    document.body.style.cursor = 'row-resize'
-    document.body.style.userSelect = 'none'
-    console.info('[termhub:layout] drag start, height before:', bottomHeightRef.current)
-
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!isDraggingRef.current) return
-      const container = mainContainerRef.current
-      if (!container) return
-      const rect = container.getBoundingClientRect()
-      // Height = distance from mouse Y to the bottom of the container.
-      const raw = rect.bottom - ev.clientY
-      const clamped = clampHeight(raw, BOTTOM_MIN_HEIGHT, BOTTOM_MAX_FRACTION, rect.height)
-      setBottomHeight(clamped)
-      bottomHeightRef.current = clamped
-    }
-
-    const onMouseUp = () => {
-      isDraggingRef.current = false
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      window.removeEventListener('mousemove', onMouseMove)
-      window.removeEventListener('mouseup', onMouseUp)
-      const finalHeight = bottomHeightRef.current
-      console.info('[termhub:layout] drag end, final height:', finalHeight)
-      // Persist the chosen height.
-      try {
-        localStorage.setItem(BOTTOM_HEIGHT_STORAGE_KEY, String(finalHeight))
-      } catch {
-        // localStorage may be unavailable in some environments
-      }
-    }
-
-    window.addEventListener('mousemove', onMouseMove)
-    window.addEventListener('mouseup', onMouseUp)
-  }, [])
+  const [showUsage, setShowUsage] = useState(false)
 
   // Refit both terminals for the active session when the window resizes.
   useEffect(() => {
@@ -261,7 +65,8 @@ export default function App() {
     return () => window.removeEventListener('resize', onResize)
   }, [activeId])
 
-  // Refit both when active session changes (their containers just became visible)
+  // Refit both when active session changes (their containers just became
+  // visible).
   useEffect(() => {
     if (!activeId) return
     const id = activeId
@@ -347,10 +152,10 @@ export default function App() {
   )
 }
 
-// Group sessions by repo root when available, falling back to cwd.
-// The map key is the group key (repoRoot or cwd); Sidebar reads the label
-// from the first session in the group via session.repoLabel or derives it
-// from the cwd.
+// Group sessions by repo root when available, falling back to cwd. The
+// map key is the group key (repoRoot or cwd); Sidebar reads the label
+// from the first session in the group via session.repoLabel or derives
+// it from the cwd.
 function groupSessions(sessions: Session[]): Map<string, Session[]> {
   const m = new Map<string, Session[]>()
   for (const s of sessions) {
