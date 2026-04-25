@@ -3,8 +3,6 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { Session } from './types'
 import type { TerminalEntry } from './App'
-import { shiftEnterSequence } from './keyHandlers'
-
 type Props = {
   session: Session
   isActive: boolean
@@ -78,20 +76,18 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
 
       // Single handler — xterm only keeps the last registered handler, so
       // all key interception must live in one call to attachCustomKeyEventHandler.
+      //
+      // Shift+Enter is intentionally NOT intercepted here.  Claude Code enables
+      // modifyOtherKeys mode (or the kitty keyboard protocol) in xterm.js by
+      // writing the appropriate escape sequence to the PTY as part of its
+      // startup.  In that mode xterm natively encodes Shift+Enter as the CSI
+      // sequence Claude Code expects (e.g. \x1b[27;2;13~) and emits it via
+      // onData, where it travels through sendInput to the PTY.
+      //
+      // Intercepting the key here and returning false suppresses that encoding
+      // and substitutes a custom byte sequence that Claude Code does not
+      // recognise, causing it to submit instead of inserting a newline.
       term.attachCustomKeyEventHandler((e) => {
-        // Shift+Enter → insert a literal newline in Claude Code's input buffer.
-        // We send ESC+CR (\x1b\r), which Claude Code's readline maps to
-        // "insert newline".  We return false so xterm does NOT also emit its
-        // own bytes for the key (a bare CR / Enter), which would submit the
-        // buffer.  The previous bug was returning true here, causing
-        // \x1b\r + \r to reach the PTY: harmless with empty input, but with
-        // text it submitted the buffer immediately after the newline.
-        const seq = shiftEnterSequence(e)
-        if (seq !== null) {
-          window.termhub.sendInput(session.id, seq)
-          return false
-        }
-
         // Ctrl+C / Ctrl+V: clipboard copy and paste.
         if (e.type === 'keydown' && e.ctrlKey) {
           const isC = e.code === 'KeyC'
