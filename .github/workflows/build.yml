@@ -20,6 +20,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
       - name: Cache node_modules
         id: cache-node-modules
@@ -35,12 +36,23 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Package Windows .exe
-        run: npm run dist:win
+      - name: Build
+        run: npm run build
+
+      - name: Package (NSIS + portable)
+        if: github.event_name != 'pull_request'
+        run: npx electron-builder --win --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package (portable only)
+        if: github.event_name == 'pull_request'
+        run: npx electron-builder --win portable --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload installer artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: termhub-windows-installer
