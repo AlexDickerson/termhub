@@ -135,6 +135,44 @@ export function BottomTerminal({
     }
   }, [isActive, session.id, termsRef, pendingDataRef])
 
+  // ResizeObserver: re-fit when the container changes size due to layout
+  // changes (sidebar toggle, right panel show/hide, session switch, etc.).
+  // rAF throttling avoids per-pixel calls during animated resizes.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    let rafId: number | null = null
+    const observer = new ResizeObserver(() => {
+      if (rafId !== null) return
+      rafId = requestAnimationFrame(() => {
+        rafId = null
+        const entry = termsRef.current.get(session.id)
+        if (!entry) return
+        const prevCols = entry.term.cols
+        const prevRows = entry.term.rows
+        try {
+          entry.fit.fit()
+        } catch {
+          // ignore — container may be zero-size during hide transition
+        }
+        const newCols = entry.term.cols
+        const newRows = entry.term.rows
+        if (newCols !== prevCols || newRows !== prevRows) {
+          console.info(
+            `[termhub:terminal] bottom session ${session.id.slice(0, 8)} resized ${prevCols}x${prevRows} -> ${newCols}x${newRows}`,
+          )
+        }
+      })
+    })
+
+    observer.observe(container)
+    return () => {
+      observer.disconnect()
+      if (rafId !== null) cancelAnimationFrame(rafId)
+    }
+  }, [session.id, termsRef])
+
   useEffect(() => {
     return () => {
       const entry = termsRef.current.get(session.id)
