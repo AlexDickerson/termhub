@@ -37,7 +37,7 @@ vi.mock('electron', () => ({
 vi.mock('@lydell/node-pty', () => ({ spawn: () => ({}) }))
 vi.mock('node:child_process', () => ({ spawn: () => ({}) }))
 
-import { buildClaudeArgs, resizePty } from './main'
+import { buildClaudeArgs, resizePty, shouldEmitStatus } from './main'
 
 const BASE = {
   sessionId: 'test-session-id',
@@ -152,5 +152,35 @@ describe('resizePty', () => {
       resize: () => { throw new Error('pty exited') },
     }
     expect(() => resizePty(t, 80, 24)).not.toThrow()
+  })
+})
+
+// Regression: pre-fix, sessions starting at 'working' that first reported
+// 'busy' (which maps to 'working') would never emit a 'session:status'
+// event, leaving the sidebar dot stuck at the renderer's 'idle' default.
+// shouldEmitStatus forces the first emission so the renderer is seeded.
+describe('shouldEmitStatus', () => {
+  it('emits the very first call regardless of equality', () => {
+    const emitted = new Set<string>()
+    expect(shouldEmitStatus(emitted, 'a', 'working', 'working')).toBe(true)
+  })
+
+  it('suppresses repeated equal calls after the first', () => {
+    const emitted = new Set<string>(['a'])
+    expect(shouldEmitStatus(emitted, 'a', 'working', 'working')).toBe(false)
+  })
+
+  it('emits when the status changes after a previous emission', () => {
+    const emitted = new Set<string>(['a'])
+    expect(shouldEmitStatus(emitted, 'a', 'working', 'idle')).toBe(true)
+    expect(shouldEmitStatus(emitted, 'a', 'idle', 'awaiting')).toBe(true)
+    expect(shouldEmitStatus(emitted, 'a', 'awaiting', 'failed')).toBe(true)
+  })
+
+  it('treats each session id independently', () => {
+    // Session "a" already seeded; session "b" hasn't been emitted yet.
+    const emitted = new Set<string>(['a'])
+    expect(shouldEmitStatus(emitted, 'a', 'working', 'working')).toBe(false)
+    expect(shouldEmitStatus(emitted, 'b', 'working', 'working')).toBe(true)
   })
 })
