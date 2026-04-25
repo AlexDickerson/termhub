@@ -14,6 +14,7 @@ export type McpHooks = {
     agent?: string
     model?: string
     dangerouslySkipPermissions?: boolean
+    permissionMode?: string
   }) => OpenSessionResult
   sendInput: (req: { sessionId: string; text: string }) => {
     ok: boolean
@@ -69,6 +70,7 @@ export async function startMcpServer(opts: {
         agent?: unknown
         model?: unknown
         dangerouslySkipPermissions?: unknown
+        permissionMode?: unknown
       }
       try {
         parsed = body ? JSON.parse(body) : {}
@@ -87,6 +89,8 @@ export async function startMcpServer(opts: {
         typeof parsed.dangerouslySkipPermissions === 'boolean'
           ? parsed.dangerouslySkipPermissions
           : undefined
+      const permissionMode =
+        typeof parsed.permissionMode === 'string' ? parsed.permissionMode : undefined
       try {
         const result = opts.hooks.openClaudeSession({
           cwd: parsed.cwd,
@@ -94,6 +98,7 @@ export async function startMcpServer(opts: {
           agent,
           model,
           dangerouslySkipPermissions,
+          permissionMode,
         })
         respondJson(res, 200, result)
       } catch (err) {

@@ -25,6 +25,7 @@ export type Config = {
     agent?: string
     model?: string
     dangerouslySkipPermissions?: boolean
+    permissionMode?: string
   }>
 }
 
