@@ -2,7 +2,13 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 type DataPayload = { id: string; data: string }
 type ExitPayload = { id: string; exitCode: number }
-type AddedPayload = { id: string; cwd: string; autoActivate?: boolean; command?: string }
+type AddedPayload = {
+  id: string
+  cwd: string
+  autoActivate?: boolean
+  command?: string
+  name?: string
+}
 type AgentDef = { name: string; path: string; description?: string }
 
 const api = {
@@ -58,18 +64,25 @@ const api = {
   },
 
   onSessionAdded: (
-    cb: (id: string, cwd: string, autoActivate: boolean, command?: string) => void,
+    cb: (
+      id: string,
+      cwd: string,
+      autoActivate: boolean,
+      command?: string,
+      name?: string,
+    ) => void,
   ): (() => void) => {
     const handler = (_e: Electron.IpcRendererEvent, p: AddedPayload) =>
-      cb(p.id, p.cwd, p.autoActivate ?? false, p.command)
+      cb(p.id, p.cwd, p.autoActivate ?? false, p.command, p.name)
     ipcRenderer.on('session:added', handler)
     return () => {
       ipcRenderer.off('session:added', handler)
     }
   },
 
-  listSessions: (): Promise<Array<{ id: string; cwd: string; command?: string }>> =>
-    ipcRenderer.invoke('sessions:list'),
+  listSessions: (): Promise<
+    Array<{ id: string; cwd: string; command?: string; name?: string }>
+  > => ipcRenderer.invoke('sessions:list'),
 
   appReady: (): void => {
     ipcRenderer.send('app:ready')

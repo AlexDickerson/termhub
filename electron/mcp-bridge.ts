@@ -75,6 +75,13 @@ async function main() {
               "Use 'bypassPermissions' for autonomous workers, 'plan' for read-only planning, " +
               "or 'default' to prompt on every action. 'auto' requires a sandbox runtime.",
           ),
+        name: z
+          .string()
+          .optional()
+          .describe(
+            'Display name for the session, shown in the termhub sidebar. ' +
+              'Falls back to the cwd basename when omitted.',
+          ),
       },
     },
     async (args) => {
@@ -89,6 +96,7 @@ async function main() {
             model: args.model,
             dangerouslySkipPermissions: args.dangerouslySkipPermissions,
             permissionMode: args.permissionMode,
+            name: args.name,
           }),
         })
         if (!response.ok) {

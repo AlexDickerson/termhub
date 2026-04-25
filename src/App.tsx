@@ -28,14 +28,18 @@ export default function App() {
     const offExit = window.termhub.onExit((id) => {
       removeSession(id)
     })
-    const offAdded = window.termhub.onSessionAdded((id, cwd, autoActivate, command) => {
-      setSessions((prev) =>
-        prev.some((s) => s.id === id) ? prev : [...prev, { id, cwd, command }],
-      )
-      if (autoActivate) {
-        setActiveId((curr) => curr ?? id)
-      }
-    })
+    const offAdded = window.termhub.onSessionAdded(
+      (id, cwd, autoActivate, command, name) => {
+        setSessions((prev) =>
+          prev.some((s) => s.id === id)
+            ? prev
+            : [...prev, { id, cwd, command, name }],
+        )
+        if (autoActivate) {
+          setActiveId((curr) => curr ?? id)
+        }
+      },
+    )
 
     // Catch up with any sessions main already created (resumed/startup) before
     // our listeners were attached, then signal that we're ready so main can

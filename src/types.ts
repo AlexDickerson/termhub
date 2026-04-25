@@ -2,6 +2,7 @@ export type Session = {
   id: string
   cwd: string
   command?: string
+  name?: string
 }
 
 export type AgentDef = {
@@ -26,6 +27,7 @@ export type Config = {
     model?: string
     dangerouslySkipPermissions?: boolean
     permissionMode?: string
+    name?: string
   }>
 }
 
@@ -47,9 +49,17 @@ export type TermhubApi = {
   onData: (cb: (id: string, data: string) => void) => () => void
   onExit: (cb: (id: string, exitCode: number) => void) => () => void
   onSessionAdded: (
-    cb: (id: string, cwd: string, autoActivate: boolean, command?: string) => void,
+    cb: (
+      id: string,
+      cwd: string,
+      autoActivate: boolean,
+      command?: string,
+      name?: string,
+    ) => void,
   ) => () => void
-  listSessions: () => Promise<Array<{ id: string; cwd: string; command?: string }>>
+  listSessions: () => Promise<
+    Array<{ id: string; cwd: string; command?: string; name?: string }>
+  >
   appReady: () => void
   listAgents: () => Promise<AgentDef[]>
   openAgent: (path: string) => Promise<void>

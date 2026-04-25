@@ -10,6 +10,7 @@ type Session = {
   id: string
   cwd: string
   command?: string
+  name?: string
   term: pty.IPty
   outputBuffer: string
 }
@@ -63,6 +64,7 @@ type StartupSession = {
   model?: string
   dangerouslySkipPermissions?: boolean
   permissionMode?: string
+  name?: string
 }
 
 type Config = {
@@ -74,6 +76,7 @@ type PersistedSession = {
   id: string
   cwd: string
   command?: string
+  name?: string
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -89,6 +92,7 @@ const DEFAULT_CONFIG: Config = {
       command: 'claude',
       agent: 'orchestrator',
       permissionMode: 'bypassPermissions',
+      name: 'orchestrator',
     },
   ],
 }
@@ -120,7 +124,8 @@ function loadPersistedSessions(): PersistedSession[] {
         s != null &&
         typeof s.id === 'string' &&
         typeof s.cwd === 'string' &&
-        (s.command === undefined || typeof s.command === 'string'),
+        (s.command === undefined || typeof s.command === 'string') &&
+        (s.name === undefined || typeof s.name === 'string'),
     )
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -217,6 +222,7 @@ function persistSessions() {
     id: s.id,
     cwd: s.cwd,
     command: s.command,
+    name: s.name,
   }))
   try {
     fs.mkdirSync(path.dirname(getSessionsPath()), { recursive: true })
@@ -353,6 +359,7 @@ function createSessionInternal(opts: {
   model?: string
   dangerouslySkipPermissions?: boolean
   permissionMode?: string
+  name?: string
   source: 'ipc' | 'mcp' | 'startup' | 'resume'
 }): { id: string; cwd: string } {
   const id = opts.id ?? randomUUID()
@@ -379,6 +386,7 @@ function createSessionInternal(opts: {
     id,
     cwd: opts.cwd,
     command: opts.command,
+    name: opts.name,
     term,
     outputBuffer: '',
   }
@@ -439,6 +447,7 @@ function createSessionInternal(opts: {
       id,
       cwd: opts.cwd,
       command: opts.command,
+      name: opts.name,
       autoActivate,
     })
   }
@@ -505,6 +514,7 @@ function bootstrapSessions(config: Config) {
         id: s.id,
         cwd: s.cwd,
         command: s.command,
+        name: s.name,
         source: 'resume',
       })
       occupiedCwds.add(s.cwd)
@@ -527,6 +537,7 @@ function bootstrapSessions(config: Config) {
         model: entry.model,
         dangerouslySkipPermissions: entry.dangerouslySkipPermissions,
         permissionMode: entry.permissionMode,
+        name: entry.name,
         source: 'startup',
       })
       occupiedCwds.add(entry.cwd)
@@ -551,6 +562,7 @@ app.whenReady().then(async () => {
           model,
           dangerouslySkipPermissions,
           permissionMode,
+          name,
         }) =>
           createSessionInternal({
             cwd,
@@ -560,6 +572,7 @@ app.whenReady().then(async () => {
             model,
             dangerouslySkipPermissions,
             permissionMode,
+            name,
             source: 'mcp',
           }),
         sendInput: ({ sessionId, text }) => {
@@ -648,6 +661,7 @@ app.whenReady().then(async () => {
       id: s.id,
       cwd: s.cwd,
       command: s.command,
+      name: s.name,
     })),
   )
 
