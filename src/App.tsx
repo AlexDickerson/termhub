@@ -1,7 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Terminal } from '@xterm/xterm'
-import type { FitAddon } from '@xterm/addon-fit'
-import type { WebLinksAddon } from '@xterm/addon-web-links'
 import { TitleBar } from './TitleBar'
 import { Sidebar } from './Sidebar'
 import { TerminalView } from './TerminalView'
@@ -9,6 +6,7 @@ import { BottomTerminal } from './BottomTerminal'
 import { RightPanel } from './RightPanel'
 import { UsageModal } from './UsageModal'
 import type { Session, SessionStatus } from './types'
+import type { TerminalEntry } from './useXterm'
 import {
   clampHeight,
   readPersistedHeight,
@@ -17,8 +15,6 @@ import {
   BOTTOM_DEFAULT_HEIGHT,
   BOTTOM_HEIGHT_STORAGE_KEY,
 } from './layout'
-
-export type TerminalEntry = { term: Terminal; fit: FitAddon; linksAddon?: WebLinksAddon }
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([])
