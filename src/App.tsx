@@ -86,6 +86,17 @@ export default function App() {
     [removeSession],
   )
 
+  const renameSession = useCallback(async (id: string, name: string) => {
+    try {
+      await window.termhub.renameSession(id, name)
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, name: name.trim() || undefined } : s)),
+      )
+    } catch (err) {
+      console.error('[termhub] renameSession failed:', err)
+    }
+  }, [])
+
   const newSession = useCallback(async () => {
     try {
       const cwd = await window.termhub.pickFolder()
@@ -146,6 +157,7 @@ export default function App() {
         onNew={newSession}
         onSelect={setActiveId}
         onClose={closeSession}
+        onRename={renameSession}
       />
       <main className="main">
         {sessions.length === 0 ? (
