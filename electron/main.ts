@@ -12,10 +12,10 @@ import type { Config, SessionStatus } from '../src/types'
 import { appendToBuffer, stripAnsi } from './output-buffer'
 import { detectRepoRoot } from './repo-root'
 import {
-  bracketedPasteWithSubmit,
   buildClaudeCommand,
   cleanEnv,
   isClaudeCommand,
+  writeBracketedPasteAndSubmit,
 } from './claude-command'
 import { listAgents, listSkills, getAgentsDir, getSkillsDir } from './agents-skills'
 import { getConfigPath, getMcpConfigPath, loadConfig } from './config'
@@ -361,7 +361,7 @@ function createSessionInternal(opts: {
     const text = opts.prompt
     setTimeout(() => {
       if (sessions.has(id)) {
-        session.term.write(bracketedPasteWithSubmit(text))
+        writeBracketedPasteAndSubmit(session.term, text)
       }
     }, 2500)
   }
@@ -533,7 +533,7 @@ app.whenReady().then(async () => {
           const result = findSessionByIdOrPrefix(sessionId)
           if (!result.found) return { ok: false, error: result.error }
           try {
-            result.session.term.write(bracketedPasteWithSubmit(text))
+            writeBracketedPasteAndSubmit(result.session.term, text)
             return { ok: true }
           } catch (err) {
             return {

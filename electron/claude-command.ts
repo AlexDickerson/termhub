@@ -80,11 +80,43 @@ export function buildClaudeCommand(opts: {
   return `claude ${flags.join(' ')}`
 }
 
-// Wrap text in bracketed-paste markers + Enter. Claude's TUI (Ink) handles
-// bracketed paste atomically, so arbitrarily long / shell-special content
-// can be injected without cmd.exe seeing or trying to parse it.
-export function bracketedPasteWithSubmit(text: string): string {
-  return `\x1b[200~${text}\x1b[201~\r`
+// Wrap text in bracketed-paste markers (no trailing CR). Claude's TUI
+// (Ink) handles bracketed paste atomically, so arbitrarily long /
+// shell-special content can be injected without cmd.exe seeing or
+// trying to parse it.
+export function bracketedPaste(text: string): string {
+  return `\x1b[200~${text}\x1b[201~`
+}
+
+type PtyWriteTarget = { write: (data: string) => void }
+
+// Send `text` as a bracketed paste, then send Enter on a later tick so
+// Ink reliably commits the paste before processing the submit keystroke.
+//
+// Without the gap, Ink can fold the trailing CR into the same read as
+// the paste-mode-exit marker (\x1b[201~) and consume it instead of
+// treating it as a separate Enter keypress — symptom: the prompt
+// appears in claude's input box but is never submitted, intermittently.
+//
+// `schedule` is injectable for tests — production callers should let it
+// default to setTimeout(cb, 50). 50ms is plenty for Ink's React
+// reconciler to commit the paste, and small enough that the user sees
+// no lag between paste and submit.
+export function writeBracketedPasteAndSubmit(
+  target: PtyWriteTarget,
+  text: string,
+  schedule: (cb: () => void) => void = (cb) => {
+    setTimeout(cb, 50)
+  },
+): void {
+  target.write(bracketedPaste(text))
+  schedule(() => {
+    try {
+      target.write('\r')
+    } catch {
+      // pty may have exited between paste and submit — swallow
+    }
+  })
 }
 
 // CLAUDE_* / CLAUDECODE / OPERON_* vars from a parent claude session leak

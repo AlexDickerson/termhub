@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
-  bracketedPasteWithSubmit,
+  bracketedPaste,
   cleanEnv,
   isClaudeCommand,
+  writeBracketedPasteAndSubmit,
 } from './claude-command'
 
 describe('isClaudeCommand', () => {
@@ -31,27 +32,73 @@ describe('isClaudeCommand', () => {
   })
 })
 
-describe('bracketedPasteWithSubmit', () => {
-  it('wraps text in bracketed-paste markers and appends CR', () => {
-    expect(bracketedPasteWithSubmit('hello')).toBe('\x1b[200~hello\x1b[201~\r')
+describe('bracketedPaste', () => {
+  it('wraps text in bracketed-paste markers (no trailing CR)', () => {
+    expect(bracketedPaste('hello')).toBe('\x1b[200~hello\x1b[201~')
   })
 
   it('passes shell-special characters through verbatim', () => {
     const text = '`backticks` $(subshell) "quotes" >redirect <files'
-    expect(bracketedPasteWithSubmit(text)).toBe(
-      `\x1b[200~${text}\x1b[201~\r`,
-    )
+    expect(bracketedPaste(text)).toBe(`\x1b[200~${text}\x1b[201~`)
   })
 
   it('preserves embedded newlines (claude paste handles multi-line atomically)', () => {
     const text = 'line1\nline2\nline3'
-    expect(bracketedPasteWithSubmit(text)).toBe(
-      `\x1b[200~${text}\x1b[201~\r`,
-    )
+    expect(bracketedPaste(text)).toBe(`\x1b[200~${text}\x1b[201~`)
   })
 
   it('handles the empty string', () => {
-    expect(bracketedPasteWithSubmit('')).toBe('\x1b[200~\x1b[201~\r')
+    expect(bracketedPaste('')).toBe('\x1b[200~\x1b[201~')
+  })
+})
+
+describe('writeBracketedPasteAndSubmit', () => {
+  // Inject a synchronous scheduler so we can verify both writes happen
+  // and the order is paste-then-submit, without leaning on real timers.
+  function makeTarget() {
+    const writes: string[] = []
+    return {
+      target: { write: (s: string) => { writes.push(s) } },
+      writes,
+    }
+  }
+  const sync = (cb: () => void) => cb()
+
+  it('writes the paste body first, then CR as a separate write', () => {
+    const { target, writes } = makeTarget()
+    writeBracketedPasteAndSubmit(target, 'hello', sync)
+    expect(writes).toEqual(['\x1b[200~hello\x1b[201~', '\r'])
+  })
+
+  it('schedules the submit on a separate tick (paste lands before scheduler fires)', () => {
+    const { target, writes } = makeTarget()
+    let scheduled: (() => void) | null = null
+    writeBracketedPasteAndSubmit(target, 'hi', (cb) => { scheduled = cb })
+    // Only the paste body should be on the wire so far.
+    expect(writes).toEqual(['\x1b[200~hi\x1b[201~'])
+    // Now run the scheduled callback — submit lands.
+    scheduled!()
+    expect(writes).toEqual(['\x1b[200~hi\x1b[201~', '\r'])
+  })
+
+  it('swallows errors from the submit write (pty may have exited)', () => {
+    let writeCount = 0
+    const target = {
+      write: () => {
+        writeCount += 1
+        if (writeCount === 2) throw new Error('pty exited')
+      },
+    }
+    expect(() => writeBracketedPasteAndSubmit(target, 'x', sync)).not.toThrow()
+    expect(writeCount).toBe(2)
+  })
+
+  it('passes shell-special chars through unchanged', () => {
+    const { target, writes } = makeTarget()
+    const text = '`tick` $(sub) "q" >r'
+    writeBracketedPasteAndSubmit(target, text, sync)
+    expect(writes[0]).toBe(`\x1b[200~${text}\x1b[201~`)
+    expect(writes[1]).toBe('\r')
   })
 })
 
