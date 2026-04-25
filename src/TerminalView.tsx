@@ -87,26 +87,17 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
       // Intercepting the key here and returning false suppresses that encoding
       // and substitutes a custom byte sequence that Claude Code does not
       // recognise, causing it to submit instead of inserting a newline.
-      // Track whether the very next onData call is from a Shift+Enter leak.
-      // Should never fire because return false suppresses xterm's encoding —
-      // but log loudly if it does so we can catch regressions.
-      let expectingShiftEnterLeak = false
-
       term.attachCustomKeyEventHandler((e) => {
         if (e.type === 'keydown' && e.shiftKey && e.key === 'Enter') {
-          // Kitty keyboard-protocol encoding for Shift+Enter.  This is the
-          // byte sequence that Claude Code receives (and inserts as a newline)
-          // when running inside Kitty / WezTerm, which both send this format.
-          // We must intercept here because xterm.js is in normal terminal mode
-          // (Claude Code has not enabled modifyOtherKeys or kitty protocol on
-          // this xterm instance), so xterm would otherwise emit bare CR (0d)
-          // which Claude Code interprets as "submit".
-          const seq = '\x1b[13;2u'
-          e.preventDefault()  // belt-and-suspenders: block browser default too
-          window.termhub.sendInput(session.id, seq)
-          expectingShiftEnterLeak = true
-          console.log('[termhub key] Shift+Enter — sent 1b 5b 31 33 3b 32 75, return false')
-          return false  // suppress xterm's 0d
+          // Kitty keyboard-protocol encoding for Shift+Enter (\x1b[13;2u).
+          // xterm.js is in normal terminal mode (Claude Code does not enable
+          // modifyOtherKeys or kitty protocol on this xterm instance), so
+          // without interception xterm emits bare CR (0d) which Claude Code
+          // treats as "submit".  The kitty form is what Claude Code receives
+          // in Kitty / WezTerm and maps to "insert newline".
+          e.preventDefault()
+          window.termhub.sendInput(session.id, '\x1b[13;2u')
+          return false
         }
 
         // Ctrl+C / Ctrl+V: clipboard copy and paste.
@@ -149,11 +140,6 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
       // cursor-positioning corruption (broken tab completion, TUIs that
       // overwrite themselves instead of scrolling).
       term.onData((data) => {
-        if (expectingShiftEnterLeak) {
-          expectingShiftEnterLeak = false
-          const hex = Array.from(data).map(c => c.codePointAt(0)!.toString(16).padStart(2, '0')).join(' ')
-          console.warn(`[termhub data] LEAK — onData fired after Shift+Enter intercept: hex ${hex}`)
-        }
         window.termhub.sendInput(session.id, data)
       })
       term.onResize(({ cols, rows }) => {
