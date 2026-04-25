@@ -146,6 +146,16 @@ const api = {
 
   openInVSCode: (cwd: string): Promise<void> =>
     ipcRenderer.invoke('vscode:open', cwd),
+
+  minimizeWindow: (): void => { ipcRenderer.send('window:minimize') },
+  maximizeWindow: (): void => { ipcRenderer.send('window:maximize') },
+  closeWindow: (): void => { ipcRenderer.send('window:close') },
+  isMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:isMaximized'),
+  onMaximizeChange: (cb: (maximized: boolean) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, maximized: boolean) => cb(maximized)
+    ipcRenderer.on('window:maximizeChange', handler)
+    return () => { ipcRenderer.off('window:maximizeChange', handler) }
+  },
 }
 
 contextBridge.exposeInMainWorld('termhub', api)
