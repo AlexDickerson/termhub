@@ -590,18 +590,23 @@ body,
   min-height: 0;
 }
 
-/* Horizontal rule between the two stacked terminals. Fixed height; a
-   draggable resizer is future work. */
+/* Horizontal rule between the two stacked terminals. Draggable to resize. */
 .main-divider {
   flex: 0 0 auto;
   height: 4px;
   background: var(--border);
   cursor: row-resize;
+  transition: background 0.15s;
 }
 
-/* Bottom shell pane — fixed v1 height. */
+.main-divider:hover,
+.main-divider:active {
+  background: var(--accent);
+}
+
+/* Bottom shell pane — height is controlled dynamically via inline style (flex-basis). */
 .main-bottom {
-  flex: 0 0 220px;
+  flex: 0 0 auto;
   position: relative;
   overflow: hidden;
   min-height: 0;
