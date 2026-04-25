@@ -21,6 +21,7 @@ type Session = {
   model?: string
   permissionMode?: string
   dangerouslySkipPermissions?: boolean
+  allowDangerouslySkipPermissions?: boolean
   // Primary PTY — runs claude (or whatever command the caller asked for).
   // This is what the MCP tools target.
   term: pty.IPty
@@ -203,6 +204,7 @@ type StartupSession = {
   agent?: string
   model?: string
   dangerouslySkipPermissions?: boolean
+  allowDangerouslySkipPermissions?: boolean
   permissionMode?: string
   name?: string
 }
@@ -220,6 +222,7 @@ type PersistedSession = {
   model?: string
   permissionMode?: string
   dangerouslySkipPermissions?: boolean
+  allowDangerouslySkipPermissions?: boolean
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -272,7 +275,9 @@ function loadPersistedSessions(): PersistedSession[] {
         (s.model === undefined || typeof s.model === 'string') &&
         (s.permissionMode === undefined || typeof s.permissionMode === 'string') &&
         (s.dangerouslySkipPermissions === undefined ||
-          typeof s.dangerouslySkipPermissions === 'boolean'),
+          typeof s.dangerouslySkipPermissions === 'boolean') &&
+        (s.allowDangerouslySkipPermissions === undefined ||
+          typeof s.allowDangerouslySkipPermissions === 'boolean'),
     )
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -373,6 +378,7 @@ function persistSessions() {
     model: s.model,
     permissionMode: s.permissionMode,
     dangerouslySkipPermissions: s.dangerouslySkipPermissions,
+    allowDangerouslySkipPermissions: s.allowDangerouslySkipPermissions,
   }))
   try {
     fs.mkdirSync(path.dirname(getSessionsPath()), { recursive: true })
@@ -444,41 +450,66 @@ function isClaudeCommand(cmd: string): boolean {
 // want stricter behavior.
 const DEFAULT_PERMISSION_MODE = 'bypassPermissions'
 
+// Pure helper — builds the flag list for a `claude` invocation. Exported for
+// unit testing; contains no side effects.
+export function buildClaudeArgs(opts: {
+  sessionId: string
+  mcpConfigPath: string
+  agent?: string
+  model?: string
+  resume?: boolean
+  dangerouslySkipPermissions?: boolean
+  allowDangerouslySkipPermissions?: boolean
+  permissionMode?: string
+}): string[] {
+  const permissionMode =
+    opts.permissionMode && opts.permissionMode.length > 0
+      ? opts.permissionMode
+      : DEFAULT_PERMISSION_MODE
+
+  const flags: string[] = [`--mcp-config "${opts.mcpConfigPath}"`]
+
+  if (opts.resume) {
+    flags.push(`--resume "${opts.sessionId}"`)
+    if (opts.model && opts.model.length > 0) {
+      flags.push(`--model "${opts.model}"`)
+    }
+  } else {
+    flags.push(`--session-id "${opts.sessionId}"`)
+    if (opts.agent && opts.agent.length > 0) {
+      flags.push(`--agent "${opts.agent}"`)
+    }
+    if (opts.model && opts.model.length > 0) {
+      flags.push(`--model "${opts.model}"`)
+    }
+  }
+
+  if (opts.dangerouslySkipPermissions) {
+    if (opts.allowDangerouslySkipPermissions) {
+      console.warn(
+        '[termhub:session] both dangerouslySkipPermissions and allowDangerouslySkipPermissions set' +
+          ' — dangerouslySkipPermissions takes precedence; ignoring allowDangerouslySkipPermissions',
+      )
+    }
+    flags.push('--dangerously-skip-permissions')
+  } else if (opts.allowDangerouslySkipPermissions) {
+    flags.push('--allow-dangerously-skip-permissions')
+  }
+
+  flags.push(`--permission-mode "${permissionMode}"`)
+  return flags
+}
+
 function buildClaudeCommand(opts: {
   sessionId: string
   agent?: string
   model?: string
   resume?: boolean
   dangerouslySkipPermissions?: boolean
+  allowDangerouslySkipPermissions?: boolean
   permissionMode?: string
 }): string {
-  const flags: string[] = [`--mcp-config "${mcpConfigPath}"`]
-  const permissionMode =
-    opts.permissionMode && opts.permissionMode.length > 0
-      ? opts.permissionMode
-      : DEFAULT_PERMISSION_MODE
-  if (opts.resume) {
-    flags.push(`--resume "${opts.sessionId}"`)
-    if (opts.model && opts.model.length > 0) {
-      flags.push(`--model "${opts.model}"`)
-    }
-    if (opts.dangerouslySkipPermissions) {
-      flags.push('--dangerously-skip-permissions')
-    }
-    flags.push(`--permission-mode "${permissionMode}"`)
-    return `claude ${flags.join(' ')}`
-  }
-  flags.push(`--session-id "${opts.sessionId}"`)
-  if (opts.agent && opts.agent.length > 0) {
-    flags.push(`--agent "${opts.agent}"`)
-  }
-  if (opts.model && opts.model.length > 0) {
-    flags.push(`--model "${opts.model}"`)
-  }
-  if (opts.dangerouslySkipPermissions) {
-    flags.push('--dangerously-skip-permissions')
-  }
-  flags.push(`--permission-mode "${permissionMode}"`)
+  const flags = buildClaudeArgs({ ...opts, mcpConfigPath })
   return `claude ${flags.join(' ')}`
 }
 
@@ -517,6 +548,7 @@ function createSessionInternal(opts: {
   agent?: string
   model?: string
   dangerouslySkipPermissions?: boolean
+  allowDangerouslySkipPermissions?: boolean
   permissionMode?: string
   name?: string
   source: 'ipc' | 'mcp' | 'startup' | 'resume'
@@ -576,6 +608,7 @@ function createSessionInternal(opts: {
     model: opts.model,
     permissionMode: opts.permissionMode,
     dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+    allowDangerouslySkipPermissions: opts.allowDangerouslySkipPermissions,
     term,
     outputBuffer: '',
     status: 'idle',
@@ -645,6 +678,7 @@ function createSessionInternal(opts: {
         agent: opts.source !== 'resume' ? opts.agent : undefined,
         model: opts.model,
         dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+        allowDangerouslySkipPermissions: opts.allowDangerouslySkipPermissions,
         permissionMode: opts.permissionMode,
         resume: opts.source === 'resume',
       })
@@ -763,6 +797,7 @@ function bootstrapSessions(config: Config) {
         model: s.model,
         permissionMode: s.permissionMode,
         dangerouslySkipPermissions: s.dangerouslySkipPermissions,
+        allowDangerouslySkipPermissions: s.allowDangerouslySkipPermissions,
         source: 'resume',
       })
       occupiedCwds.add(s.cwd)
@@ -784,6 +819,7 @@ function bootstrapSessions(config: Config) {
         agent: entry.agent,
         model: entry.model,
         dangerouslySkipPermissions: entry.dangerouslySkipPermissions,
+        allowDangerouslySkipPermissions: entry.allowDangerouslySkipPermissions,
         permissionMode: entry.permissionMode,
         name: entry.name,
         source: 'startup',
@@ -812,6 +848,7 @@ app.whenReady().then(async () => {
           agent,
           model,
           dangerouslySkipPermissions,
+          allowDangerouslySkipPermissions,
           permissionMode,
           name,
         }) =>
@@ -822,6 +859,7 @@ app.whenReady().then(async () => {
             agent,
             model,
             dangerouslySkipPermissions,
+            allowDangerouslySkipPermissions,
             permissionMode,
             name,
             source: 'mcp',

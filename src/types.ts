@@ -36,6 +36,7 @@ export type Config = {
     agent?: string
     model?: string
     dangerouslySkipPermissions?: boolean
+    allowDangerouslySkipPermissions?: boolean
     permissionMode?: string
     name?: string
   }>

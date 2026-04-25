@@ -29,7 +29,9 @@ async function main() {
       description:
         'Spawns a new terminal in termhub running `claude` (an interactive Claude Code session). ' +
         'Use this to delegate work to a sub-agent. Provide an absolute working directory and an ' +
-        'optional initial prompt that the new claude will receive as its first user message.',
+        'optional initial prompt that the new claude will receive as its first user message. ' +
+        'To start in plan mode but allow flipping to bypass later (without restarting), use ' +
+        'permissionMode: "plan" together with allowDangerouslySkipPermissions: true.',
       inputSchema: {
         cwd: z
           .string()
@@ -59,6 +61,17 @@ async function main() {
             'When true, passes --dangerously-skip-permissions to claude, bypassing all per-tool ' +
               'approval prompts. Use only for autonomous workers where you trust the prompt and ' +
               'agent definition; the worker can take any action without confirmation.',
+          ),
+        allowDangerouslySkipPermissions: z
+          .boolean()
+          .optional()
+          .describe(
+            'When true, passes --allow-dangerously-skip-permissions to claude. This adds ' +
+              'bypassPermissions to the shift+tab cycle without activating it immediately, so ' +
+              'the user or operator can flip into bypass mode mid-session without restarting. ' +
+              'Useful when starting in plan mode but wanting the option to escalate later. ' +
+              'Independent of dangerouslySkipPermissions; if both are true, ' +
+              'dangerouslySkipPermissions takes precedence.',
           ),
         permissionMode: z
           .enum([
@@ -95,6 +108,7 @@ async function main() {
             agent: args.agent,
             model: args.model,
             dangerouslySkipPermissions: args.dangerouslySkipPermissions,
+            allowDangerouslySkipPermissions: args.allowDangerouslySkipPermissions,
             permissionMode: args.permissionMode,
             name: args.name,
           }),

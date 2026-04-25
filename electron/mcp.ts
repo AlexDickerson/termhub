@@ -14,6 +14,7 @@ export type McpHooks = {
     agent?: string
     model?: string
     dangerouslySkipPermissions?: boolean
+    allowDangerouslySkipPermissions?: boolean
     permissionMode?: string
     name?: string
   }) => OpenSessionResult
@@ -71,6 +72,7 @@ export async function startMcpServer(opts: {
         agent?: unknown
         model?: unknown
         dangerouslySkipPermissions?: unknown
+        allowDangerouslySkipPermissions?: unknown
         permissionMode?: unknown
         name?: unknown
       }
@@ -91,6 +93,10 @@ export async function startMcpServer(opts: {
         typeof parsed.dangerouslySkipPermissions === 'boolean'
           ? parsed.dangerouslySkipPermissions
           : undefined
+      const allowDangerouslySkipPermissions =
+        typeof parsed.allowDangerouslySkipPermissions === 'boolean'
+          ? parsed.allowDangerouslySkipPermissions
+          : undefined
       const permissionMode =
         typeof parsed.permissionMode === 'string' ? parsed.permissionMode : undefined
       const name = typeof parsed.name === 'string' ? parsed.name : undefined
@@ -101,6 +107,7 @@ export async function startMcpServer(opts: {
           agent,
           model,
           dangerouslySkipPermissions,
+          allowDangerouslySkipPermissions,
           permissionMode,
           name,
         })
