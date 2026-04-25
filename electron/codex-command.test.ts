@@ -3,6 +3,7 @@ import {
   isClaudeModelName,
   buildCodexArgs,
   buildCodexCommand,
+  DEFAULT_CODEX_BYPASS_APPROVALS,
 } from './codex-command'
 
 describe('isClaudeModelName', () => {
@@ -36,8 +37,25 @@ describe('isClaudeModelName', () => {
 })
 
 describe('buildCodexArgs', () => {
-  it('returns empty array when no opts provided', () => {
-    expect(buildCodexArgs({})).toEqual([])
+  it('DEFAULT_CODEX_BYPASS_APPROVALS is true', () => {
+    expect(DEFAULT_CODEX_BYPASS_APPROVALS).toBe(true)
+  })
+
+  it('includes --dangerously-bypass-approvals-and-sandbox by default (no opts)', () => {
+    // Default prevents directory-trust and command-approval prompts from blocking
+    // MCP-spawned autonomous sessions.
+    const flags = buildCodexArgs({})
+    expect(flags).toContain('--dangerously-bypass-approvals-and-sandbox')
+  })
+
+  it('includes --dangerously-bypass-approvals-and-sandbox when explicitly true', () => {
+    const flags = buildCodexArgs({ dangerouslyBypassApprovals: true })
+    expect(flags).toContain('--dangerously-bypass-approvals-and-sandbox')
+  })
+
+  it('omits bypass flag when explicitly false (caller opts out)', () => {
+    const flags = buildCodexArgs({ dangerouslyBypassApprovals: false })
+    expect(flags).not.toContain('--dangerously-bypass-approvals-and-sandbox')
   })
 
   it('includes -m flag when model is provided', () => {
@@ -53,21 +71,6 @@ describe('buildCodexArgs', () => {
   it('omits -m when model is empty', () => {
     const flags = buildCodexArgs({ model: '' })
     expect(flags.join(' ')).not.toContain('-m')
-  })
-
-  it('includes --dangerously-bypass-approvals-and-sandbox when dangerouslyBypassApprovals is true', () => {
-    const flags = buildCodexArgs({ dangerouslyBypassApprovals: true })
-    expect(flags).toContain('--dangerously-bypass-approvals-and-sandbox')
-  })
-
-  it('does not include bypass flag when false', () => {
-    const flags = buildCodexArgs({ dangerouslyBypassApprovals: false })
-    expect(flags).not.toContain('--dangerously-bypass-approvals-and-sandbox')
-  })
-
-  it('does not include bypass flag when omitted', () => {
-    const flags = buildCodexArgs({})
-    expect(flags).not.toContain('--dangerously-bypass-approvals-and-sandbox')
   })
 
   it('includes prompt as last quoted positional arg', () => {
@@ -92,13 +95,13 @@ describe('buildCodexArgs', () => {
   })
 
   it('omits prompt when empty string', () => {
-    const flags = buildCodexArgs({ prompt: '' })
-    expect(flags.join(' ')).not.toContain('"')
+    const flags = buildCodexArgs({ dangerouslyBypassApprovals: false, prompt: '' })
+    expect(flags).toEqual([])
   })
 
   it('omits prompt when undefined', () => {
-    const flags = buildCodexArgs({})
-    expect(flags.join(' ')).not.toContain('"')
+    const flags = buildCodexArgs({ dangerouslyBypassApprovals: false })
+    expect(flags).toEqual([])
   })
 
   it('builds the full flag set in the right order', () => {
@@ -119,8 +122,15 @@ describe('buildCodexArgs', () => {
 })
 
 describe('buildCodexCommand', () => {
-  it('returns just "codex" with no opts', () => {
-    expect(buildCodexCommand({})).toBe('codex')
+  it('includes bypass flag by default (no opts)', () => {
+    // Default prevents directory-trust prompts from blocking autonomous sessions.
+    expect(buildCodexCommand({})).toBe(
+      'codex --dangerously-bypass-approvals-and-sandbox',
+    )
+  })
+
+  it('returns just "codex" when bypass explicitly disabled and no other opts', () => {
+    expect(buildCodexCommand({ dangerouslyBypassApprovals: false })).toBe('codex')
   })
 
   it('prefixes with "codex " when flags are present', () => {
@@ -140,8 +150,11 @@ describe('buildCodexCommand', () => {
     )
   })
 
-  it('prompt-only invocation (no model, no bypass)', () => {
-    const cmd = buildCodexCommand({ prompt: 'Hello codex' })
+  it('prompt-only invocation with bypass explicitly disabled', () => {
+    const cmd = buildCodexCommand({
+      dangerouslyBypassApprovals: false,
+      prompt: 'Hello codex',
+    })
     expect(cmd).toBe('codex "Hello codex"')
   })
 })

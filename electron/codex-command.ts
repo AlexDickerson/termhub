@@ -17,11 +17,20 @@ export function isClaudeModelName(model: string): boolean {
   return model.toLowerCase().startsWith('claude-')
 }
 
+// Default bypass applied to every spawned Codex session when the caller doesn't
+// opt out. --dangerously-bypass-approvals-and-sandbox skips all confirmation
+// prompts (including directory-trust prompts) and disables the sandbox.
+// Analogous to Claude's DEFAULT_PERMISSION_MODE = 'bypassPermissions' —
+// MCP-spawned sessions run inside termhub are operator-controlled and should
+// not block on interactive confirmations.
+export const DEFAULT_CODEX_BYPASS_APPROVALS = true
+
 // Builds the flag list for a `codex` invocation.
 //
 // open_session field mapping:
 //   model                      → -m <model>
 //   dangerouslyBypassApprovals → --dangerously-bypass-approvals-and-sandbox
+//                                (defaults to true — see DEFAULT_CODEX_BYPASS_APPROVALS)
 //   prompt                     → positional <prompt> argument (must be last)
 //
 // Not mapped (no codex equivalent):
@@ -37,7 +46,10 @@ export function buildCodexArgs(opts: {
     flags.push(`-m "${opts.model}"`)
   }
 
-  if (opts.dangerouslyBypassApprovals) {
+  // Default to true so sessions don't block on directory-trust or command-
+  // approval prompts. Pass dangerouslyBypassApprovals: false to opt out.
+  const bypass = opts.dangerouslyBypassApprovals ?? DEFAULT_CODEX_BYPASS_APPROVALS
+  if (bypass) {
     flags.push('--dangerously-bypass-approvals-and-sandbox')
   }
 
