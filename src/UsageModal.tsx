@@ -42,9 +42,9 @@ export function UsageModal({ onClose }: Props) {
           height: '640px',
           maxWidth: 'calc(100vw - 48px)',
           maxHeight: 'calc(100vh - 48px)',
-          background: '#1e1e1e',
+          background: '#221e32',
           borderRadius: '8px',
-          border: '1px solid rgba(255,255,255,0.12)',
+          border: '1px solid #302848',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
@@ -57,7 +57,7 @@ export function UsageModal({ onClose }: Props) {
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '8px 12px',
-            borderBottom: '1px solid rgba(255,255,255,0.1)',
+            borderBottom: '1px solid #302848',
             flexShrink: 0,
           }}
         >

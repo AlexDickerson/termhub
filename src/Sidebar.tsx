@@ -108,12 +108,6 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-header">
-        <span className="brand">termhub</span>
-        <button className="new-btn" onClick={onNew} title="New session">
-          + New
-        </button>
-      </div>
       <div className="groups">
         {[...groups.entries()].map(([groupKey, list]) => {
           const first = list[0]
@@ -187,6 +181,12 @@ export function Sidebar({
           </div>
           )
         })}
+      </div>
+
+      <div className="sidebar-footer">
+        <button className="new-btn sidebar-new-btn" onClick={onNew}>
+          + New Session
+        </button>
       </div>
 
       {contextMenu && contextSession && (

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Terminal } from '@xterm/xterm'
 import type { FitAddon } from '@xterm/addon-fit'
+import { TitleBar } from './TitleBar'
 import { Sidebar } from './Sidebar'
 import { TerminalView } from './TerminalView'
 import { BottomTerminal } from './BottomTerminal'
@@ -231,50 +232,53 @@ export default function App() {
 
   return (
     <div className="app">
-      <Sidebar
-        groups={grouped}
-        activeId={activeId}
-        statuses={statuses}
-        onNew={newSession}
-        onSelect={setActiveId}
-        onClose={closeSession}
-        onRename={renameSession}
-      />
-      <main className="main">
-        {sessions.length === 0 ? (
-          <div className="empty">
-            <p>No sessions yet.</p>
-            <button onClick={newSession}>+ New Session</button>
-          </div>
-        ) : (
-          <>
-            <div className="main-top">
-              {sessions.map((s) => (
-                <TerminalView
-                  key={s.id}
-                  session={s}
-                  isActive={s.id === activeId}
-                  termsRef={termsRef}
-                  pendingDataRef={pendingDataRef}
-                />
-              ))}
+      <TitleBar onOpenUsage={() => setShowUsage(true)} />
+      <div className="app-body">
+        <Sidebar
+          groups={grouped}
+          activeId={activeId}
+          statuses={statuses}
+          onNew={newSession}
+          onSelect={setActiveId}
+          onClose={closeSession}
+          onRename={renameSession}
+        />
+        <main className="main">
+          {sessions.length === 0 ? (
+            <div className="empty">
+              <p>No sessions yet.</p>
+              <button onClick={newSession}>+ New Session</button>
             </div>
-            <div className="main-divider" />
-            <div className="main-bottom">
-              {sessions.map((s) => (
-                <BottomTerminal
-                  key={s.id}
-                  session={s}
-                  isActive={s.id === activeId}
-                  termsRef={shellTermsRef}
-                  pendingDataRef={shellPendingDataRef}
-                />
-              ))}
-            </div>
-          </>
-        )}
-      </main>
-      <RightPanel activeSession={activeSession} onOpenUsage={() => setShowUsage(true)} />
+          ) : (
+            <>
+              <div className="main-top">
+                {sessions.map((s) => (
+                  <TerminalView
+                    key={s.id}
+                    session={s}
+                    isActive={s.id === activeId}
+                    termsRef={termsRef}
+                    pendingDataRef={pendingDataRef}
+                  />
+                ))}
+              </div>
+              <div className="main-divider" />
+              <div className="main-bottom">
+                {sessions.map((s) => (
+                  <BottomTerminal
+                    key={s.id}
+                    session={s}
+                    isActive={s.id === activeId}
+                    termsRef={shellTermsRef}
+                    pendingDataRef={shellPendingDataRef}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </main>
+        <RightPanel activeSession={activeSession} />
+      </div>
       {showUsage && <UsageModal onClose={() => setShowUsage(false)} />}
     </div>
   )

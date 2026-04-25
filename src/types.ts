@@ -89,6 +89,11 @@ export type TermhubApi = {
   openSkill: (path: string) => Promise<void>
   renameSession: (id: string, name: string) => Promise<void>
   openInVSCode: (cwd: string) => Promise<void>
+  minimizeWindow: () => void
+  maximizeWindow: () => void
+  closeWindow: () => void
+  isMaximized: () => Promise<boolean>
+  onMaximizeChange: (cb: (maximized: boolean) => void) => () => void
 }
 
 declare global {

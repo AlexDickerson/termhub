@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, clipboard, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, clipboard, shell, Menu } from 'electron'
 import * as pty from '@lydell/node-pty'
 import * as path from 'node:path'
 import * as os from 'node:os'
@@ -690,8 +690,9 @@ function createWindow() {
     height: 820,
     minWidth: 700,
     minHeight: 400,
-    backgroundColor: '#1e1e1e',
+    backgroundColor: '#161618',
     title: 'termhub',
+    frame: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -699,6 +700,15 @@ function createWindow() {
       sandbox: false,
       webviewTag: true,
     },
+  })
+
+  // Push maximize/restore state to the renderer so the title bar button
+  // can show the correct icon without polling.
+  mainWindow.on('maximize', () => {
+    mainWindow?.webContents.send('window:maximizeChange', true)
+  })
+  mainWindow.on('unmaximize', () => {
+    mainWindow?.webContents.send('window:maximizeChange', false)
   })
 
   const devUrl = process.env.VITE_DEV_SERVER_URL
@@ -786,6 +796,9 @@ function bootstrapSessions(config: Config) {
 }
 
 app.whenReady().then(async () => {
+  // Remove the native File/Edit/… menu bar entirely.
+  Menu.setApplicationMenu(null)
+
   const config = loadConfig()
   mcpConfigPath = writeMcpConfigFile(config.mcpPort)
 
@@ -1004,6 +1017,18 @@ app.whenReady().then(async () => {
   ipcMain.on('clipboard:write', (_event, text: string) => {
     clipboard.writeText(text)
   })
+
+  // Window controls — invoked from the custom title bar.
+  ipcMain.on('window:minimize', () => { mainWindow?.minimize() })
+  ipcMain.on('window:maximize', () => {
+    if (mainWindow?.isMaximized()) {
+      mainWindow.unmaximize()
+    } else {
+      mainWindow?.maximize()
+    }
+  })
+  ipcMain.on('window:close', () => { mainWindow?.close() })
+  ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized() ?? false)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
