@@ -77,7 +77,8 @@ export async function startMcpServer(opts: {
       try {
         parsed = body ? JSON.parse(body) : {}
       } catch (err) {
-        respondJson(res, 400, { error: 'invalid_json', detail: String(err) })
+        console.warn('[termhub:mcp] open_session: invalid JSON in request body', err)
+        respondJson(res, 400, { error: 'invalid_json' })
         return
       }
       if (typeof parsed.cwd !== 'string') {
@@ -106,10 +107,8 @@ export async function startMcpServer(opts: {
         })
         respondJson(res, 200, result)
       } catch (err) {
-        respondJson(res, 500, {
-          error: 'open_session_failed',
-          detail: err instanceof Error ? err.message : String(err),
-        })
+        console.error('[termhub:mcp] open_session: hook threw unexpectedly', err)
+        respondJson(res, 500, { error: 'open_session_failed' })
       }
       return
     }
@@ -120,7 +119,8 @@ export async function startMcpServer(opts: {
       try {
         parsed = body ? JSON.parse(body) : {}
       } catch (err) {
-        respondJson(res, 400, { error: 'invalid_json', detail: String(err) })
+        console.warn('[termhub:mcp] send_input: invalid JSON in request body', err)
+        respondJson(res, 400, { error: 'invalid_json' })
         return
       }
       if (typeof parsed.sessionId !== 'string' || typeof parsed.text !== 'string') {
@@ -141,7 +141,8 @@ export async function startMcpServer(opts: {
       try {
         parsed = body ? JSON.parse(body) : {}
       } catch (err) {
-        respondJson(res, 400, { error: 'invalid_json', detail: String(err) })
+        console.warn('[termhub:mcp] read_output: invalid JSON in request body', err)
+        respondJson(res, 400, { error: 'invalid_json' })
         return
       }
       if (typeof parsed.sessionId !== 'string') {
