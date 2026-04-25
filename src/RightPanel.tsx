@@ -13,9 +13,6 @@ export function RightPanel({ activeSession }: Props) {
   return (
     <aside className="right-panel">
       <div className="right-panel-body">
-        <CollapsibleSection title="Pull Request">
-          <SessionPrPanel session={activeSession} />
-        </CollapsibleSection>
         <CollapsibleSection title="Agents">
           <AgentList />
         </CollapsibleSection>
@@ -24,6 +21,9 @@ export function RightPanel({ activeSession }: Props) {
         </CollapsibleSection>
         <CollapsibleSection title="MCP">
           <McpList session={activeSession} />
+        </CollapsibleSection>
+        <CollapsibleSection title="Pull Request">
+          <SessionPrPanel session={activeSession} />
         </CollapsibleSection>
       </div>
     </aside>
