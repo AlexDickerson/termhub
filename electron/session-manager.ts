@@ -17,6 +17,7 @@ import {
   isClaudeCommand,
   writeBracketedPasteAndSubmit,
 } from './claude-command'
+import { buildCodexCommand } from './codex-command'
 import { writePersistedSessions, type PersistedSession } from './persistence'
 import { getMcpConfigPath } from './config'
 
@@ -27,6 +28,7 @@ export type Session = {
   name?: string
   repoRoot?: string
   repoLabel?: string
+  cli?: 'claude' | 'codex'
   model?: string
   permissionMode?: string
   dangerouslySkipPermissions?: boolean
@@ -141,6 +143,7 @@ export function persistSessions(): void {
     permissionMode: s.permissionMode,
     dangerouslySkipPermissions: s.dangerouslySkipPermissions,
     allowDangerouslySkipPermissions: s.allowDangerouslySkipPermissions,
+    cli: s.cli,
   }))
   writePersistedSessions(list)
 }
@@ -164,12 +167,14 @@ export function createSessionInternal(opts: {
   allowDangerouslySkipPermissions?: boolean
   permissionMode?: string
   name?: string
+  cli?: 'claude' | 'codex'
   source: 'ipc' | 'mcp' | 'startup' | 'resume'
 }): { id: string; cwd: string; promptSettled: Promise<void> } {
   const id = opts.id ?? randomUUID()
+  const cli = opts.cli ?? 'claude'
   const shell = process.env.COMSPEC || 'cmd.exe'
   console.log(
-    `[termhub] spawning ${shell} in ${opts.cwd} (id=${id.slice(0, 8)}, source=${opts.source})`,
+    `[termhub:session] spawning ${shell} in ${opts.cwd} (id=${id.slice(0, 8)}, cli=${cli}, source=${opts.source})`,
   )
   let term: pty.IPty
   try {
@@ -218,6 +223,7 @@ export function createSessionInternal(opts: {
     name: opts.name,
     repoRoot: repoInfo?.repoRoot,
     repoLabel: repoInfo?.repoLabel,
+    cli,
     model: opts.model,
     permissionMode: opts.permissionMode,
     dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
@@ -257,8 +263,13 @@ export function createSessionInternal(opts: {
   // promptSettled resolves once delivery is complete (paste + CR
   // written), or once we know it's never going to happen (fallback fired,
   // session exited, no prompt provided).
+  // Codex receives its prompt as a positional CLI arg embedded in the
+  // command string — no bracketed-paste delivery needed.
   const wantsPrompt =
-    opts.source !== 'resume' && opts.prompt !== undefined && opts.prompt.length > 0
+    opts.source !== 'resume' &&
+    opts.prompt !== undefined &&
+    opts.prompt.length > 0 &&
+    cli !== 'codex'
   let promptSent = false
   let resolvePromptSettled: () => void = () => {}
   const promptSettled: Promise<void> = wantsPrompt
@@ -295,7 +306,8 @@ export function createSessionInternal(opts: {
   // Watch the Claude Code JSONL file for ground-truth status updates. The
   // file is created by Claude Code shortly after startup; the watcher polls
   // and will begin emitting once the file appears.
-  if (opts.command && isClaudeCommand(opts.command)) {
+  // Codex does not produce a Claude Code JSONL file — skip the watcher.
+  if (cli !== 'codex' && opts.command && isClaudeCommand(opts.command)) {
     session.jsonlWatcher = watchSessionStatus(id, (next) => {
       // Send the initial prompt the first time claude reports 'idle'
       // (parked at the input prompt, submit handler wired). 'busy' and
@@ -366,7 +378,18 @@ export function createSessionInternal(opts: {
 
   if (opts.command && opts.command.trim().length > 0) {
     let finalCommand: string
-    if (isClaudeCommand(opts.command)) {
+    if (cli === 'codex') {
+      finalCommand = buildCodexCommand({
+        model: opts.model,
+        dangerouslyBypassApprovals: opts.dangerouslySkipPermissions,
+        // Prompt is embedded in the command for codex (positional arg).
+        prompt: opts.source !== 'resume' ? opts.prompt : undefined,
+      })
+      console.info(
+        `[termhub:session] ${id.slice(0, 8)} codex spawn — cwd=${opts.cwd}` +
+          (opts.model ? ` model=${opts.model}` : ''),
+      )
+    } else if (isClaudeCommand(opts.command)) {
       finalCommand = buildClaudeCommand({
         sessionId: id,
         mcpConfigPath: getMcpConfigPath(),
@@ -394,6 +417,7 @@ export function createSessionInternal(opts: {
       name: opts.name,
       repoRoot: repoInfo?.repoRoot,
       repoLabel: repoInfo?.repoLabel,
+      cli,
       autoActivate,
     })
   }

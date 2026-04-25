@@ -26,13 +26,15 @@ async function main() {
   server.registerTool(
     'open_session',
     {
-      title: 'Open a new termhub terminal running Claude',
+      title: 'Open a new termhub terminal session',
       description:
-        'Spawns a new terminal in termhub running `claude` (an interactive Claude Code session). ' +
-        'Use this to delegate work to a sub-agent. Provide an absolute working directory and an ' +
-        'optional initial prompt that the new claude will receive as its first user message. ' +
+        'Spawns a new terminal in termhub running `claude` (Claude Code) or `codex` (OpenAI Codex CLI). ' +
+        'Use `cli: "codex"` to spawn a Codex session; omit or set `cli: "claude"` (default) for Claude Code. ' +
+        'Provide an absolute working directory and an optional initial prompt. ' +
+        'For Claude Code: the prompt is delivered as the first user message once the TUI boots. ' +
+        'For Codex: the prompt is passed as a CLI argument at launch. ' +
         'To start in plan mode but allow flipping to bypass later (without restarting), use ' +
-        'permissionMode: "plan" together with allowDangerouslySkipPermissions: true.',
+        'permissionMode: "plan" together with allowDangerouslySkipPermissions: true (Claude only).',
       inputSchema: {
         cwd: z
           .string()
@@ -96,6 +98,17 @@ async function main() {
             'Display name for the session, shown in the termhub sidebar. ' +
               'Falls back to the cwd basename when omitted.',
           ),
+        cli: z
+          .enum(['claude', 'codex'])
+          .optional()
+          .describe(
+            'CLI runtime to use. "claude" (default) spawns Claude Code; ' +
+              '"codex" spawns the OpenAI Codex CLI. ' +
+              'When using "codex", pass a Codex-compatible model (e.g. "o3") — ' +
+              'passing a Claude model name with cli: "codex" is a configuration error. ' +
+              'The agent, permissionMode, and allowDangerouslySkipPermissions fields ' +
+              'are Claude-specific and are ignored when cli is "codex".',
+          ),
       },
     },
     async (args) => {
@@ -112,6 +125,7 @@ async function main() {
             allowDangerouslySkipPermissions: args.allowDangerouslySkipPermissions,
             permissionMode: args.permissionMode,
             name: args.name,
+            cli: args.cli,
           }),
         })
         if (!response.ok) {

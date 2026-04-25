@@ -111,11 +111,11 @@ export function useSessions(refs: SessionRefs): UseSessionsResult {
       shellPendingDataRef.current.delete(id)
     })
     const offAdded = window.termhub.onSessionAdded(
-      (id, cwd, autoActivate, command, name, repoRoot, repoLabel) => {
+      (id, cwd, autoActivate, command, name, repoRoot, repoLabel, cli) => {
         setSessions((prev) =>
           prev.some((s) => s.id === id)
             ? prev
-            : [...prev, { id, cwd, command, name, repoRoot, repoLabel }],
+            : [...prev, { id, cwd, command, name, repoRoot, repoLabel, cli }],
         )
         if (autoActivate) {
           setActiveId((curr) => curr ?? id)
@@ -141,6 +141,7 @@ export function useSessions(refs: SessionRefs): UseSessionsResult {
                 name: s.name,
                 repoRoot: s.repoRoot,
                 repoLabel: s.repoLabel,
+                cli: s.cli,
               })),
           ]
         })

@@ -5,6 +5,7 @@ export type Session = {
   name?: string
   repoRoot?: string
   repoLabel?: string
+  cli?: 'claude' | 'codex'
 }
 
 // Advisory, UI-only session status sourced from Claude Code's own JSONL file.
@@ -36,6 +37,7 @@ export type StartupSession = {
   allowDangerouslySkipPermissions?: boolean
   permissionMode?: string
   name?: string
+  cli?: 'claude' | 'codex'
 }
 
 export type Config = {
@@ -83,10 +85,11 @@ export type TermhubApi = {
       name?: string,
       repoRoot?: string,
       repoLabel?: string,
+      cli?: 'claude' | 'codex',
     ) => void,
   ) => () => void
   listSessions: () => Promise<
-    Array<{ id: string; cwd: string; command?: string; name?: string; repoRoot?: string; repoLabel?: string }>
+    Array<{ id: string; cwd: string; command?: string; name?: string; repoRoot?: string; repoLabel?: string; cli?: 'claude' | 'codex' }>
   >
   appReady: () => void
   listAgents: () => Promise<AgentDef[]>

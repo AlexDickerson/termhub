@@ -13,6 +13,7 @@ import { stripAnsi } from './output-buffer'
 import { writeBracketedPasteAndSubmit } from './claude-command'
 import { getMcpConfigPath, loadConfig } from './config'
 import { loadPersistedSessions } from './persistence'
+import { isClaudeModelName } from './codex-command'
 import {
   createSessionInternal,
   findSessionByIdOrPrefix,
@@ -141,6 +142,7 @@ function bootstrapSessions(config: Config): void {
         permissionMode: s.permissionMode,
         dangerouslySkipPermissions: s.dangerouslySkipPermissions,
         allowDangerouslySkipPermissions: s.allowDangerouslySkipPermissions,
+        cli: s.cli,
         source: 'resume',
       })
       occupiedCwds.add(s.cwd)
@@ -170,6 +172,7 @@ function bootstrapSessions(config: Config): void {
         allowDangerouslySkipPermissions: entry.allowDangerouslySkipPermissions,
         permissionMode: entry.permissionMode,
         name: entry.name,
+        cli: entry.cli,
         source: 'startup',
       })
       occupiedCwds.add(entry.cwd)
@@ -210,7 +213,23 @@ app.whenReady().then(async () => {
           allowDangerouslySkipPermissions,
           permissionMode,
           name,
+          cli,
         }) => {
+          const resolvedCli = cli ?? 'claude'
+
+          // Reject claude model names when spawning a codex session — they
+          // are incompatible and the session would fail at runtime.
+          if (resolvedCli === 'codex' && model && isClaudeModelName(model)) {
+            console.warn(
+              `[termhub:session] open_session rejected: cli='codex' with Claude model '${model}'. ` +
+                `Use a Codex-compatible model (e.g. "o3") or omit model to use the Codex default.`,
+            )
+            throw new Error(
+              `Cannot use Claude model '${model}' with cli='codex'. ` +
+                `Pass a Codex-compatible model (e.g. "o3") or omit model.`,
+            )
+          }
+
           const myTurn = openSessionQueue.catch(() => {})
           let release!: (value: unknown) => void
           openSessionQueue = new Promise((resolve) => {
@@ -220,7 +239,7 @@ app.whenReady().then(async () => {
           try {
             const result = createSessionInternal({
               cwd,
-              command: 'claude',
+              command: resolvedCli,
               prompt,
               agent,
               model,
@@ -228,6 +247,7 @@ app.whenReady().then(async () => {
               allowDangerouslySkipPermissions,
               permissionMode,
               name,
+              cli: resolvedCli,
               source: 'mcp',
             })
             await result.promptSettled
