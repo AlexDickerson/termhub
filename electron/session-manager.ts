@@ -18,6 +18,7 @@ import {
   writeBracketedPasteAndSubmit,
 } from './claude-command'
 import { buildCodexCommand } from './codex-command'
+import { buildGeminiCommand } from './gemini-command'
 import { writePersistedSessions, type PersistedSession } from './persistence'
 import { getMcpConfigPath } from './config'
 
@@ -28,7 +29,7 @@ export type Session = {
   name?: string
   repoRoot?: string
   repoLabel?: string
-  cli?: 'claude' | 'codex'
+  cli?: 'claude' | 'codex' | 'gemini'
   model?: string
   permissionMode?: string
   dangerouslySkipPermissions?: boolean
@@ -167,7 +168,7 @@ export function createSessionInternal(opts: {
   allowDangerouslySkipPermissions?: boolean
   permissionMode?: string
   name?: string
-  cli?: 'claude' | 'codex'
+  cli?: 'claude' | 'codex' | 'gemini'
   source: 'ipc' | 'mcp' | 'startup' | 'resume'
 }): { id: string; cwd: string; promptSettled: Promise<void> } {
   const id = opts.id ?? randomUUID()
@@ -263,13 +264,13 @@ export function createSessionInternal(opts: {
   // promptSettled resolves once delivery is complete (paste + CR
   // written), or once we know it's never going to happen (fallback fired,
   // session exited, no prompt provided).
-  // Codex receives its prompt as a positional CLI arg embedded in the
-  // command string — no bracketed-paste delivery needed.
+  // Codex and Gemini receive their prompt as a positional CLI arg embedded in
+  // the command string — only Claude uses bracketed-paste delivery.
   const wantsPrompt =
     opts.source !== 'resume' &&
     opts.prompt !== undefined &&
     opts.prompt.length > 0 &&
-    cli !== 'codex'
+    cli === 'claude'
   let promptSent = false
   let resolvePromptSettled: () => void = () => {}
   const promptSettled: Promise<void> = wantsPrompt
@@ -306,8 +307,8 @@ export function createSessionInternal(opts: {
   // Watch the Claude Code JSONL file for ground-truth status updates. The
   // file is created by Claude Code shortly after startup; the watcher polls
   // and will begin emitting once the file appears.
-  // Codex does not produce a Claude Code JSONL file — skip the watcher.
-  if (cli !== 'codex' && opts.command && isClaudeCommand(opts.command)) {
+  // Codex and Gemini don't produce a Claude Code JSONL file — skip the watcher.
+  if (cli === 'claude' && opts.command && isClaudeCommand(opts.command)) {
     session.jsonlWatcher = watchSessionStatus(id, (next) => {
       // Send the initial prompt the first time claude reports 'idle'
       // (parked at the input prompt, submit handler wired). 'busy' and
@@ -387,6 +388,18 @@ export function createSessionInternal(opts: {
       })
       console.info(
         `[termhub:session] ${id.slice(0, 8)} codex spawn — cwd=${opts.cwd}` +
+          (opts.model ? ` model=${opts.model}` : '') +
+          ` cmd="${finalCommand}"`,
+      )
+    } else if (cli === 'gemini') {
+      finalCommand = buildGeminiCommand({
+        model: opts.model,
+        yolo: opts.dangerouslySkipPermissions,
+        // Prompt is embedded in the command as a positional arg.
+        prompt: opts.source !== 'resume' ? opts.prompt : undefined,
+      })
+      console.info(
+        `[termhub:session] ${id.slice(0, 8)} gemini spawn — cwd=${opts.cwd}` +
           (opts.model ? ` model=${opts.model}` : '') +
           ` cmd="${finalCommand}"`,
       )

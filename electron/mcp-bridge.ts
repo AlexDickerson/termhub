@@ -99,15 +99,16 @@ async function main() {
               'Falls back to the cwd basename when omitted.',
           ),
         cli: z
-          .enum(['claude', 'codex'])
+          .enum(['claude', 'codex', 'gemini'])
           .optional()
           .describe(
             'CLI runtime to use. "claude" (default) spawns Claude Code; ' +
-              '"codex" spawns the OpenAI Codex CLI. ' +
-              'When using "codex", pass a Codex-compatible model (e.g. "o3") — ' +
-              'passing a Claude model name with cli: "codex" is a configuration error. ' +
+              '"codex" spawns the OpenAI Codex CLI; ' +
+              '"gemini" spawns the Gemini CLI. ' +
+              'When using "codex" or "gemini", pass a compatible model — ' +
+              'passing a Claude model name with a non-claude cli is a configuration error. ' +
               'The agent, permissionMode, and allowDangerouslySkipPermissions fields ' +
-              'are Claude-specific and are ignored when cli is "codex".',
+              'are Claude-specific and are ignored for codex and gemini.',
           ),
       },
     },

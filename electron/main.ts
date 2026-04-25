@@ -217,16 +217,16 @@ app.whenReady().then(async () => {
         }) => {
           const resolvedCli = cli ?? 'claude'
 
-          // Reject claude model names when spawning a codex session — they
-          // are incompatible and the session would fail at runtime.
-          if (resolvedCli === 'codex' && model && isClaudeModelName(model)) {
+          // Reject claude model names when spawning a codex or gemini session —
+          // they are incompatible and the session would fail at runtime.
+          if (resolvedCli !== 'claude' && model && isClaudeModelName(model)) {
             console.warn(
-              `[termhub:session] open_session rejected: cli='codex' with Claude model '${model}'. ` +
-                `Use a Codex-compatible model (e.g. "o3") or omit model to use the Codex default.`,
+              `[termhub:session] open_session rejected: cli='${resolvedCli}' with Claude model '${model}'. ` +
+                `Use a ${resolvedCli}-compatible model or omit model to use the default.`,
             )
             throw new Error(
-              `Cannot use Claude model '${model}' with cli='codex'. ` +
-                `Pass a Codex-compatible model (e.g. "o3") or omit model.`,
+              `Cannot use Claude model '${model}' with cli='${resolvedCli}'. ` +
+                `Pass a ${resolvedCli}-compatible model or omit model.`,
             )
           }
 

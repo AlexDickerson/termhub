@@ -19,7 +19,7 @@ type AddedPayload = {
   name?: string
   repoRoot?: string
   repoLabel?: string
-  cli?: 'claude' | 'codex'
+  cli?: 'claude' | 'codex' | 'gemini'
 }
 
 const api = {
@@ -115,7 +115,7 @@ const api = {
       name?: string,
       repoRoot?: string,
       repoLabel?: string,
-      cli?: 'claude' | 'codex',
+      cli?: 'claude' | 'codex' | 'gemini',
     ) => void,
   ): (() => void) => {
     const handler = (_e: Electron.IpcRendererEvent, p: AddedPayload) =>
@@ -127,7 +127,7 @@ const api = {
   },
 
   listSessions: (): Promise<
-    Array<{ id: string; cwd: string; command?: string; name?: string; repoRoot?: string; repoLabel?: string; cli?: 'claude' | 'codex' }>
+    Array<{ id: string; cwd: string; command?: string; name?: string; repoRoot?: string; repoLabel?: string; cli?: 'claude' | 'codex' | 'gemini' }>
   > => ipcRenderer.invoke('sessions:list'),
 
   appReady: (): void => {
