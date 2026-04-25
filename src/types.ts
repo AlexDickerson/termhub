@@ -24,6 +24,7 @@ export type Config = {
     prompt?: string
     agent?: string
     model?: string
+    dangerouslySkipPermissions?: boolean
   }>
 }
 

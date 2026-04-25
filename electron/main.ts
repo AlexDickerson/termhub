@@ -19,6 +19,7 @@ type StartupSession = {
   prompt?: string
   agent?: string
   model?: string
+  dangerouslySkipPermissions?: boolean
 }
 
 type Config = {
@@ -239,12 +240,16 @@ function buildClaudeCommand(opts: {
   model?: string
   userPrompt?: string
   resume?: boolean
+  dangerouslySkipPermissions?: boolean
 }): string {
   const flags: string[] = [`--mcp-config "${mcpConfigPath}"`]
   if (opts.resume) {
     flags.push(`--resume "${opts.sessionId}"`)
     if (opts.model && opts.model.length > 0) {
       flags.push(`--model "${opts.model}"`)
+    }
+    if (opts.dangerouslySkipPermissions) {
+      flags.push('--dangerously-skip-permissions')
     }
     return `claude ${flags.join(' ')}`
   }
@@ -254,6 +259,9 @@ function buildClaudeCommand(opts: {
   }
   if (opts.model && opts.model.length > 0) {
     flags.push(`--model "${opts.model}"`)
+  }
+  if (opts.dangerouslySkipPermissions) {
+    flags.push('--dangerously-skip-permissions')
   }
   let cmd = `claude ${flags.join(' ')}`
   if (opts.userPrompt && opts.userPrompt.length > 0) {
@@ -277,6 +285,7 @@ function createSessionInternal(opts: {
   prompt?: string
   agent?: string
   model?: string
+  dangerouslySkipPermissions?: boolean
   source: 'ipc' | 'mcp' | 'startup' | 'resume'
 }): { id: string; cwd: string } {
   const id = opts.id ?? randomUUID()
@@ -325,6 +334,7 @@ function createSessionInternal(opts: {
         sessionId: id,
         agent: opts.source !== 'resume' ? opts.agent : undefined,
         model: opts.model,
+        dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
         userPrompt: opts.source !== 'resume' ? opts.prompt : undefined,
         resume: opts.source === 'resume',
       })
@@ -428,6 +438,7 @@ function bootstrapSessions(config: Config) {
         prompt: entry.prompt,
         agent: entry.agent,
         model: entry.model,
+        dangerouslySkipPermissions: entry.dangerouslySkipPermissions,
         source: 'startup',
       })
       occupiedCwds.add(entry.cwd)
@@ -445,13 +456,14 @@ app.whenReady().then(async () => {
     mcpHandle = await startMcpServer({
       port: config.mcpPort,
       hooks: {
-        openClaudeSession: ({ cwd, prompt, agent, model }) =>
+        openClaudeSession: ({ cwd, prompt, agent, model, dangerouslySkipPermissions }) =>
           createSessionInternal({
             cwd,
             command: 'claude',
             prompt,
             agent,
             model,
+            dangerouslySkipPermissions,
             source: 'mcp',
           }),
       },

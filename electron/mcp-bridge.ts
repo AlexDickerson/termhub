@@ -52,6 +52,14 @@ async function main() {
             'Model to use for the new session, e.g. "claude-opus-4-7" or "claude-sonnet-4-6". ' +
               'Passed to claude as --model. Omit to use the user\'s default.',
           ),
+        dangerouslySkipPermissions: z
+          .boolean()
+          .optional()
+          .describe(
+            'When true, passes --dangerously-skip-permissions to claude, bypassing all per-tool ' +
+              'approval prompts. Use only for autonomous workers where you trust the prompt and ' +
+              'agent definition; the worker can take any action without confirmation.',
+          ),
       },
     },
     async (args) => {
@@ -64,6 +72,7 @@ async function main() {
             prompt: args.prompt,
             agent: args.agent,
             model: args.model,
+            dangerouslySkipPermissions: args.dangerouslySkipPermissions,
           }),
         })
         if (!response.ok) {

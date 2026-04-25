@@ -13,6 +13,7 @@ export type McpHooks = {
     prompt?: string
     agent?: string
     model?: string
+    dangerouslySkipPermissions?: boolean
   }) => OpenSessionResult
 }
 
@@ -59,6 +60,7 @@ export async function startMcpServer(opts: {
         prompt?: unknown
         agent?: unknown
         model?: unknown
+        dangerouslySkipPermissions?: unknown
       }
       try {
         parsed = body ? JSON.parse(body) : {}
@@ -73,8 +75,18 @@ export async function startMcpServer(opts: {
       const prompt = typeof parsed.prompt === 'string' ? parsed.prompt : undefined
       const agent = typeof parsed.agent === 'string' ? parsed.agent : undefined
       const model = typeof parsed.model === 'string' ? parsed.model : undefined
+      const dangerouslySkipPermissions =
+        typeof parsed.dangerouslySkipPermissions === 'boolean'
+          ? parsed.dangerouslySkipPermissions
+          : undefined
       try {
-        const result = opts.hooks.openClaudeSession({ cwd: parsed.cwd, prompt, agent, model })
+        const result = opts.hooks.openClaudeSession({
+          cwd: parsed.cwd,
+          prompt,
+          agent,
+          model,
+          dangerouslySkipPermissions,
+        })
         respondJson(res, 200, result)
       } catch (err) {
         respondJson(res, 500, {
