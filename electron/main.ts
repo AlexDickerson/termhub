@@ -3,6 +3,7 @@ import * as pty from '@lydell/node-pty'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import * as fs from 'node:fs'
+import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { startMcpServer, type McpHandle } from './mcp'
 
@@ -15,6 +16,8 @@ type Session = {
   cwd: string
   command?: string
   name?: string
+  repoRoot?: string
+  repoLabel?: string
   model?: string
   permissionMode?: string
   dangerouslySkipPermissions?: boolean
@@ -123,6 +126,53 @@ function recomputeStatus(session: Session) {
       session.statusReevalTimer = null
       recomputeStatus(session)
     }, SPINNER_HOLD_MS + 100)
+  }
+}
+
+// Walk upward from cwd looking for a .git entry (file or directory).
+// If found as a file (worktree), parse the `gitdir:` line to resolve the
+// main checkout root (two dirname()s up from the worktree-specific gitdir).
+// Returns { repoRoot, repoLabel } or null when no repo is found.
+function detectRepoRoot(cwd: string): { repoRoot: string; repoLabel: string } | null {
+  let current = path.resolve(cwd)
+  while (true) {
+    const gitEntry = path.join(current, '.git')
+    let stat: fs.Stats | null = null
+    try {
+      stat = fs.statSync(gitEntry)
+    } catch {
+      // not found at this level — keep walking
+    }
+    if (stat !== null) {
+      if (stat.isDirectory()) {
+        // Normal checkout: .git directory means this directory IS the repo root
+        return { repoRoot: current, repoLabel: path.basename(current) }
+      }
+      if (stat.isFile()) {
+        // Git worktree: .git file contains "gitdir: <path>"
+        try {
+          const contents = fs.readFileSync(gitEntry, 'utf8')
+          const m = /^gitdir:\s*(.+)$/m.exec(contents)
+          if (m) {
+            // Typically: <main-checkout>/.git/worktrees/<name>
+            // Two dirname()s up: strip /<name> then /worktrees → <main-checkout>/.git
+            // One more dirname(): the main checkout root
+            const worktreeGitDir = path.resolve(current, m[1].trim())
+            const mainGit = path.dirname(path.dirname(worktreeGitDir))
+            const mainCheckout = path.dirname(mainGit)
+            return { repoRoot: mainCheckout, repoLabel: path.basename(mainCheckout) }
+          }
+        } catch {
+          // unreadable .git file — treat as no-repo
+        }
+      }
+    }
+    const parent = path.dirname(current)
+    if (parent === current) {
+      // Reached filesystem root — no repo found
+      return null
+    }
+    current = parent
   }
 }
 
@@ -515,11 +565,14 @@ function createSessionInternal(opts: {
   }
   console.log(`[termhub] shell pty.spawn returned (pid=${shellTerm.pid})`)
 
+  const repoInfo = detectRepoRoot(opts.cwd)
   const session: Session = {
     id,
     cwd: opts.cwd,
     command: opts.command,
     name: opts.name,
+    repoRoot: repoInfo?.repoRoot,
+    repoLabel: repoInfo?.repoLabel,
     model: opts.model,
     permissionMode: opts.permissionMode,
     dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
@@ -622,6 +675,8 @@ function createSessionInternal(opts: {
       cwd: opts.cwd,
       command: opts.command,
       name: opts.name,
+      repoRoot: repoInfo?.repoRoot,
+      repoLabel: repoInfo?.repoLabel,
       autoActivate,
     })
   }
@@ -642,6 +697,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webviewTag: true,
     },
   })
 
@@ -872,6 +928,8 @@ app.whenReady().then(async () => {
       cwd: s.cwd,
       command: s.command,
       name: s.name,
+      repoRoot: s.repoRoot,
+      repoLabel: s.repoLabel,
     })),
   )
 
@@ -905,6 +963,23 @@ app.whenReady().then(async () => {
     }
     const err = await shell.openPath(resolved)
     if (err) throw new Error(err)
+  })
+
+  ipcMain.handle('vscode:open', (_event, cwd: string) => {
+    return new Promise<void>((resolve, reject) => {
+      const proc = spawn('code', [cwd], {
+        shell: true,
+        detached: true,
+        stdio: 'ignore',
+      })
+      proc.unref()
+      proc.on('error', (err) => {
+        console.error('[termhub] failed to open VS Code:', err)
+        reject(err)
+      })
+      // Resolve immediately — we don't wait for the editor to close
+      resolve()
+    })
   })
 
   ipcMain.handle('dialog:pickFolder', async () => {

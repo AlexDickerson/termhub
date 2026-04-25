@@ -5,6 +5,7 @@ import { Sidebar } from './Sidebar'
 import { TerminalView } from './TerminalView'
 import { BottomTerminal } from './BottomTerminal'
 import { RightPanel } from './RightPanel'
+import { UsageModal } from './UsageModal'
 import type { Session, SessionStatus } from './types'
 
 export type TerminalEntry = { term: Terminal; fit: FitAddon }
@@ -13,6 +14,7 @@ export default function App() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [statuses, setStatuses] = useState<Record<string, SessionStatus>>({})
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [showUsage, setShowUsage] = useState(false)
   // Primary (claude) PTY xterm instances, keyed by session id.
   const termsRef = useRef(new Map<string, TerminalEntry>())
   const pendingDataRef = useRef(new Map<string, string[]>())
@@ -67,11 +69,11 @@ export default function App() {
       shellPendingDataRef.current.delete(id)
     })
     const offAdded = window.termhub.onSessionAdded(
-      (id, cwd, autoActivate, command, name) => {
+      (id, cwd, autoActivate, command, name, repoRoot, repoLabel) => {
         setSessions((prev) =>
           prev.some((s) => s.id === id)
             ? prev
-            : [...prev, { id, cwd, command, name }],
+            : [...prev, { id, cwd, command, name, repoRoot, repoLabel }],
         )
         if (autoActivate) {
           setActiveId((curr) => curr ?? id)
@@ -86,7 +88,14 @@ export default function App() {
       if (existing.length > 0) {
         setSessions((prev) => {
           const seen = new Set(prev.map((s) => s.id))
-          return [...prev, ...existing.filter((s) => !seen.has(s.id))]
+          return [...prev, ...existing.filter((s) => !seen.has(s.id)).map((s) => ({
+            id: s.id,
+            cwd: s.cwd,
+            command: s.command,
+            name: s.name,
+            repoRoot: s.repoRoot,
+            repoLabel: s.repoLabel,
+          }))]
         })
         setActiveId((curr) => curr ?? existing[0].id)
       }
@@ -214,7 +223,7 @@ export default function App() {
     return () => cancelAnimationFrame(raf)
   }, [activeId])
 
-  const grouped = useMemo(() => groupByCwd(sessions), [sessions])
+  const grouped = useMemo(() => groupSessions(sessions), [sessions])
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeId) ?? null,
     [sessions, activeId],
@@ -265,17 +274,23 @@ export default function App() {
           </>
         )}
       </main>
-      <RightPanel activeSession={activeSession} />
+      <RightPanel activeSession={activeSession} onOpenUsage={() => setShowUsage(true)} />
+      {showUsage && <UsageModal onClose={() => setShowUsage(false)} />}
     </div>
   )
 }
 
-function groupByCwd(sessions: Session[]): Map<string, Session[]> {
+// Group sessions by repo root when available, falling back to cwd.
+// The map key is the group key (repoRoot or cwd); Sidebar reads the label
+// from the first session in the group via session.repoLabel or derives it
+// from the cwd.
+function groupSessions(sessions: Session[]): Map<string, Session[]> {
   const m = new Map<string, Session[]>()
   for (const s of sessions) {
-    const list = m.get(s.cwd) ?? []
+    const key = s.repoRoot ?? s.cwd
+    const list = m.get(key) ?? []
     list.push(s)
-    m.set(s.cwd, list)
+    m.set(key, list)
   }
   return m
 }

@@ -37,15 +37,29 @@ export function Sidebar({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Find the session object from context menu id
+  const contextSession = contextMenu
+    ? [...groups.values()].flat().find((s) => s.id === contextMenu.sessionId) ?? null
+    : null
 
   // Close context menu on outside click or Escape
   useEffect(() => {
     if (!contextMenu) return
-    const close = () => setContextMenu(null)
-    window.addEventListener('click', close)
-    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') close() })
+    const onMouseDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setContextMenu(null)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null)
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    document.addEventListener('keydown', onKeyDown)
     return () => {
-      window.removeEventListener('click', close)
+      document.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('keydown', onKeyDown)
     }
   }, [contextMenu])
 
@@ -80,10 +94,16 @@ export function Sidebar({
     setContextMenu({ sessionId: session.id, x: e.clientX, y: e.clientY })
   }, [])
 
-  // Find the session object from context menu id
-  const contextSession = contextMenu
-    ? [...groups.values()].flat().find((s) => s.id === contextMenu.sessionId) ?? null
-    : null
+  const handleOpenInVSCode = useCallback(async () => {
+    if (!contextSession) return
+    const { cwd } = contextSession
+    setContextMenu(null)
+    try {
+      await window.termhub.openInVSCode(cwd)
+    } catch (err) {
+      console.error('[termhub] openInVSCode failed:', err)
+    }
+  }, [contextSession])
 
 
   return (
@@ -95,10 +115,14 @@ export function Sidebar({
         </button>
       </div>
       <div className="groups">
-        {[...groups.entries()].map(([cwd, list]) => (
-          <div className="group" key={cwd}>
-            <div className="group-title" title={cwd}>
-              {shortenPath(cwd)}
+        {[...groups.entries()].map(([groupKey, list]) => {
+          const first = list[0]
+          const label = first?.repoLabel ?? shortenPath(first?.cwd ?? groupKey)
+          const titleAttr = first?.repoRoot ?? first?.cwd ?? groupKey
+          return (
+          <div className="group" key={groupKey}>
+            <div className="group-title" title={titleAttr}>
+              {label}
             </div>
             <ul className="group-list">
               {list.map((s, idx) => {
@@ -161,15 +185,23 @@ export function Sidebar({
               })}
             </ul>
           </div>
-        ))}
+          )
+        })}
       </div>
 
       {contextMenu && contextSession && (
         <div
+          ref={menuRef}
           className="context-menu"
           style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
+          <button
+            className="context-menu-item"
+            onClick={() => void handleOpenInVSCode()}
+          >
+            Open in VS Code
+          </button>
           <button
             className="context-menu-item"
             onClick={() => startRename(contextSession)}

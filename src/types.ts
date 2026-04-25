@@ -3,6 +3,8 @@ export type Session = {
   cwd: string
   command?: string
   name?: string
+  repoRoot?: string
+  repoLabel?: string
 }
 
 // Advisory, UI-only status derived from the session's output stream.
@@ -73,10 +75,12 @@ export type TermhubApi = {
       autoActivate: boolean,
       command?: string,
       name?: string,
+      repoRoot?: string,
+      repoLabel?: string,
     ) => void,
   ) => () => void
   listSessions: () => Promise<
-    Array<{ id: string; cwd: string; command?: string; name?: string }>
+    Array<{ id: string; cwd: string; command?: string; name?: string; repoRoot?: string; repoLabel?: string }>
   >
   appReady: () => void
   listAgents: () => Promise<AgentDef[]>
@@ -84,6 +88,7 @@ export type TermhubApi = {
   listSkills: () => Promise<SkillDef[]>
   openSkill: (path: string) => Promise<void>
   renameSession: (id: string, name: string) => Promise<void>
+  openInVSCode: (cwd: string) => Promise<void>
 }
 
 declare global {
