@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 type DataPayload = { id: string; data: string }
 type ExitPayload = { id: string; exitCode: number }
+type SessionStatus = 'working' | 'awaiting' | 'idle' | 'failed'
+type StatusPayload = { id: string; status: SessionStatus }
 type AddedPayload = {
   id: string
   cwd: string
@@ -60,6 +62,17 @@ const api = {
     ipcRenderer.on('session:exit', handler)
     return () => {
       ipcRenderer.off('session:exit', handler)
+    }
+  },
+
+  onStatusChanged: (
+    cb: (id: string, status: SessionStatus) => void,
+  ): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, p: StatusPayload) =>
+      cb(p.id, p.status)
+    ipcRenderer.on('session:status', handler)
+    return () => {
+      ipcRenderer.off('session:status', handler)
     }
   },
 

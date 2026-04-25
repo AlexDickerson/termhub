@@ -5,6 +5,14 @@ export type Session = {
   name?: string
 }
 
+// Advisory, UI-only status derived from the session's output stream.
+// 'working'  — Claude is actively generating / running tools (spinner visible)
+// 'awaiting' — Claude has stopped and is asking the user something
+//              (permission prompt or numbered choice)
+// 'idle'     — at the empty input prompt, ready for the next message
+// 'failed'   — the underlying process died with a non-zero exit code
+export type SessionStatus = 'working' | 'awaiting' | 'idle' | 'failed'
+
 export type AgentDef = {
   name: string
   path: string
@@ -48,6 +56,9 @@ export type TermhubApi = {
   writeClipboard: (text: string) => void
   onData: (cb: (id: string, data: string) => void) => () => void
   onExit: (cb: (id: string, exitCode: number) => void) => () => void
+  onStatusChanged: (
+    cb: (id: string, status: SessionStatus) => void,
+  ) => () => void
   onSessionAdded: (
     cb: (
       id: string,
