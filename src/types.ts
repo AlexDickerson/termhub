@@ -3,6 +3,8 @@ export type Session = {
   cwd: string
   command?: string
   name?: string
+  repoRoot?: string
+  repoLabel?: string
 }
 
 export type AgentDef = {
@@ -62,10 +64,12 @@ export type TermhubApi = {
       autoActivate: boolean,
       command?: string,
       name?: string,
+      repoRoot?: string,
+      repoLabel?: string,
     ) => void,
   ) => () => void
   listSessions: () => Promise<
-    Array<{ id: string; cwd: string; command?: string; name?: string }>
+    Array<{ id: string; cwd: string; command?: string; name?: string; repoRoot?: string; repoLabel?: string }>
   >
   appReady: () => void
   listAgents: () => Promise<AgentDef[]>

@@ -98,10 +98,14 @@ export function Sidebar({ groups, activeId, onNew, onSelect, onClose, onRename }
         </button>
       </div>
       <div className="groups">
-        {[...groups.entries()].map(([cwd, list]) => (
-          <div className="group" key={cwd}>
-            <div className="group-title" title={cwd}>
-              {shortenPath(cwd)}
+        {[...groups.entries()].map(([groupKey, list]) => {
+          const first = list[0]
+          const label = first?.repoLabel ?? shortenPath(first?.cwd ?? groupKey)
+          const titleAttr = first?.repoRoot ?? first?.cwd ?? groupKey
+          return (
+          <div className="group" key={groupKey}>
+            <div className="group-title" title={titleAttr}>
+              {label}
             </div>
             <ul className="group-list">
               {list.map((s, idx) => (
@@ -156,7 +160,8 @@ export function Sidebar({ groups, activeId, onNew, onSelect, onClose, onRename }
               ))}
             </ul>
           </div>
-        ))}
+          )
+        })}
       </div>
 
       {contextMenu && contextSession && (
