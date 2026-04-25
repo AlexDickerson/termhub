@@ -5,6 +5,7 @@ import { Sidebar } from './Sidebar'
 import { TerminalView } from './TerminalView'
 import { BottomTerminal } from './BottomTerminal'
 import { RightPanel } from './RightPanel'
+import { UsageModal } from './UsageModal'
 import type { Session } from './types'
 
 export type TerminalEntry = { term: Terminal; fit: FitAddon }
@@ -12,6 +13,7 @@ export type TerminalEntry = { term: Terminal; fit: FitAddon }
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [showUsage, setShowUsage] = useState(false)
   // Primary (claude) PTY xterm instances, keyed by session id.
   const termsRef = useRef(new Map<string, TerminalEntry>())
   const pendingDataRef = useRef(new Map<string, string[]>())
@@ -253,7 +255,8 @@ export default function App() {
           </>
         )}
       </main>
-      <RightPanel activeSession={activeSession} />
+      <RightPanel activeSession={activeSession} onOpenUsage={() => setShowUsage(true)} />
+      {showUsage && <UsageModal onClose={() => setShowUsage(false)} />}
     </div>
   )
 }
