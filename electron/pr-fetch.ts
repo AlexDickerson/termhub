@@ -154,21 +154,100 @@ export function fetchGhPrList(cwd: string, branch: string): Promise<SessionPr[]>
 
 /**
  * Spawn `gh pr merge <number> --squash --delete-branch` in the given cwd.
- * Resolves on success, rejects on failure.
+ * Always resolves — never rejects. Callers check exitCode to determine outcome.
  */
-export function runGhPrMerge(cwd: string, prNumber: number): Promise<void> {
-  return new Promise((resolve, reject) => {
+export function runGhPrMerge(
+  cwd: string,
+  prNumber: number,
+): Promise<{ exitCode: number; stderr: string }> {
+  return new Promise((resolve) => {
     execFile(
       'gh',
       ['pr', 'merge', String(prNumber), '--squash', '--delete-branch'],
       { cwd, shell: false },
       (err, _stdout, stderr) => {
         if (err) {
-          reject(new Error(`gh pr merge failed: ${stderr.trim() || err.message}`))
+          // err.code is the process exit code (number) for non-zero exits, or a
+          // string like 'ENOENT' for OS-level spawn errors.
+          const code = (err as { code?: unknown }).code
+          const exitCode = typeof code === 'number' ? code : 1
+          resolve({ exitCode, stderr: stderr.trim() || err.message })
           return
         }
-        resolve()
+        resolve({ exitCode: 0, stderr: '' })
       },
     )
   })
+}
+
+/**
+ * Parse the output of `gh pr view --json state,mergedAt`.
+ * Returns null on any parse failure.
+ */
+export function parseGhPrViewOutput(
+  raw: string,
+): { state: string; mergedAt: string | null } | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    typeof (parsed as Record<string, unknown>).state !== 'string'
+  ) {
+    return null
+  }
+  const obj = parsed as Record<string, unknown>
+  const mergedAt = typeof obj.mergedAt === 'string' ? obj.mergedAt : null
+  return { state: obj.state as string, mergedAt }
+}
+
+/**
+ * Run `gh pr view <number> --json state,mergedAt` in the given cwd.
+ * Rejects if gh is unavailable or the PR cannot be fetched.
+ */
+export function fetchGhPrViewState(
+  cwd: string,
+  prNumber: number,
+): Promise<{ state: string; mergedAt: string | null }> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'gh',
+      ['pr', 'view', String(prNumber), '--json', 'state,mergedAt'],
+      { cwd, shell: false },
+      (err, stdout, stderr) => {
+        if (err) {
+          reject(new Error(`gh pr view failed: ${stderr.trim() || err.message}`))
+          return
+        }
+        const result = parseGhPrViewOutput(stdout)
+        if (!result) {
+          reject(new Error(`gh pr view returned unparseable output: ${stdout.slice(0, 200)}`))
+          return
+        }
+        resolve(result)
+      },
+    )
+  })
+}
+
+/**
+ * Decide whether a merge should be treated as successful given the gh exit code
+ * and the post-call PR view result (null if the view call itself failed).
+ *
+ * exit 0 → success regardless of view result.
+ * exit non-zero, view shows MERGED or non-null mergedAt → the API merge worked;
+ *   local sync failed (e.g. base branch held by another worktree). Treat as success.
+ * exit non-zero, anything else → real failure.
+ */
+export function resolveMergeOutcome(
+  exitCode: number,
+  viewResult: { state: string; mergedAt: string | null } | null,
+): boolean {
+  if (exitCode === 0) return true
+  if (!viewResult) return false
+  return viewResult.state.toUpperCase() === 'MERGED' || viewResult.mergedAt !== null
 }

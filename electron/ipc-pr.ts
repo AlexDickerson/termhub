@@ -12,7 +12,9 @@ import {
 import {
   buildCacheKey,
   fetchGhPrList,
+  fetchGhPrViewState,
   getGitBranch,
+  resolveMergeOutcome,
   runGhPrMerge,
 } from './pr-fetch'
 import type { SessionPr } from '../src/types'
@@ -134,21 +136,37 @@ export function registerPrHandlers(): void {
       const session = getSession(payload.id)
       if (!session) throw new Error(`Session not found: ${payload.id}`)
 
-      console.info(
-        `[termhub:pr] merge initiated — session ${payload.id.slice(0, 8)} PR #${payload.prNumber}`,
-      )
-      try {
-        await runGhPrMerge(session.cwd, payload.prNumber)
-        console.info(
-          `[termhub:pr] merge success — session ${payload.id.slice(0, 8)} PR #${payload.prNumber}`,
-        )
-      } catch (err) {
-        console.error(
-          `[termhub:pr] merge failed — session ${payload.id.slice(0, 8)} PR #${payload.prNumber}:`,
-          err,
-        )
-        throw err
+      const sessionTag = `session ${payload.id.slice(0, 8)} PR #${payload.prNumber}`
+      console.info(`[termhub:pr] merge initiated — ${sessionTag}`)
+
+      const { exitCode, stderr } = await runGhPrMerge(session.cwd, payload.prNumber)
+
+      if (exitCode !== 0) {
+        // gh exited non-zero. Check whether the API merge succeeded anyway —
+        // this happens when the local-sync step (git checkout base + pull) fails
+        // because the base branch is already checked out in another worktree.
+        let viewResult: { state: string; mergedAt: string | null } | null = null
+        try {
+          viewResult = await fetchGhPrViewState(session.cwd, payload.prNumber)
+        } catch (viewErr) {
+          console.warn(
+            `[termhub:pr] ${sessionTag}: gh pr view failed after merge error —`,
+            viewErr instanceof Error ? viewErr.message : String(viewErr),
+          )
+        }
+
+        if (resolveMergeOutcome(exitCode, viewResult)) {
+          // API merge confirmed. The local-sync failure is cosmetic — swallow it.
+          console.warn(
+            `[termhub:pr] ${sessionTag}: local-sync failed but API merge succeeded (base branch held by another worktree?). gh stderr: ${stderr}`,
+          )
+        } else {
+          console.error(`[termhub:pr] merge failed — ${sessionTag}: ${stderr}`)
+          throw new Error(`gh pr merge failed: ${stderr}`)
+        }
       }
+
+      console.info(`[termhub:pr] merge success — ${sessionTag}`)
 
       // Refresh PR state after merge (it will now show as merged/closed).
       await fetchAndCachePr(payload.id)
