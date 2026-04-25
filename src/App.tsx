@@ -10,6 +10,7 @@ import type { TerminalEntry } from './useXterm'
 import { useSessions } from './useSessions'
 import { useSplitLayout } from './useSplitLayout'
 
+// Dummy PR for termhub testing
 export default function App() {
   // Primary (claude) PTY xterm instances, keyed by session id. Owned here
   // because both useSessions (for dispose-on-remove) and TerminalView /
