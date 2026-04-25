@@ -15,7 +15,8 @@
     "dev": "concurrently -k -n vite,electron -c blue,magenta \"npm:dev:vite\" \"npm:dev:electron\"",
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.electron.json",
-    "dist:win": "npm run build && electron-builder --win --publish never"
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "test": "vitest run"
   },
   "build": {
     "appId": "com.alexdickerson.termhub",
@@ -78,6 +79,7 @@
     "esbuild": "^0.24.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.11",
+    "vitest": "^2.1.9",
     "wait-on": "^8.0.1"
   }
 }
