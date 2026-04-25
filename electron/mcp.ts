@@ -15,6 +15,14 @@ export type McpHooks = {
     model?: string
     dangerouslySkipPermissions?: boolean
   }) => OpenSessionResult
+  sendInput: (req: { sessionId: string; text: string }) => {
+    ok: boolean
+    error?: string
+  }
+  readOutput: (req: { sessionId: string; maxChars?: number; raw?: boolean }) => {
+    text?: string
+    error?: string
+  }
 }
 
 export type McpHandle = {
@@ -94,6 +102,50 @@ export async function startMcpServer(opts: {
           detail: err instanceof Error ? err.message : String(err),
         })
       }
+      return
+    }
+
+    if (req.url === '/internal/send_input' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => '')
+      let parsed: { sessionId?: unknown; text?: unknown }
+      try {
+        parsed = body ? JSON.parse(body) : {}
+      } catch (err) {
+        respondJson(res, 400, { error: 'invalid_json', detail: String(err) })
+        return
+      }
+      if (typeof parsed.sessionId !== 'string' || typeof parsed.text !== 'string') {
+        respondJson(res, 400, { error: 'sessionId and text must be strings' })
+        return
+      }
+      const result = opts.hooks.sendInput({
+        sessionId: parsed.sessionId,
+        text: parsed.text,
+      })
+      respondJson(res, result.ok ? 200 : 400, result)
+      return
+    }
+
+    if (req.url === '/internal/read_output' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => '')
+      let parsed: { sessionId?: unknown; maxChars?: unknown; raw?: unknown }
+      try {
+        parsed = body ? JSON.parse(body) : {}
+      } catch (err) {
+        respondJson(res, 400, { error: 'invalid_json', detail: String(err) })
+        return
+      }
+      if (typeof parsed.sessionId !== 'string') {
+        respondJson(res, 400, { error: 'sessionId must be a string' })
+        return
+      }
+      const result = opts.hooks.readOutput({
+        sessionId: parsed.sessionId,
+        maxChars:
+          typeof parsed.maxChars === 'number' ? parsed.maxChars : undefined,
+        raw: typeof parsed.raw === 'boolean' ? parsed.raw : undefined,
+      })
+      respondJson(res, result.error ? 400 : 200, result)
       return
     }
 

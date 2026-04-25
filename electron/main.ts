@@ -11,6 +11,48 @@ type Session = {
   cwd: string
   command?: string
   term: pty.IPty
+  outputBuffer: string
+}
+
+const MAX_OUTPUT_BUFFER_BYTES = 256 * 1024
+
+function appendToBuffer(buf: string, chunk: string): string {
+  const combined = buf + chunk
+  if (combined.length <= MAX_OUTPUT_BUFFER_BYTES) return combined
+  return combined.slice(combined.length - MAX_OUTPUT_BUFFER_BYTES)
+}
+
+// Lossy but adequate ANSI/control-char stripper for read_output. Captures
+// CSI/OSC/DCS sequences and stray control bytes; doesn't replay cursor
+// movement, so heavy TUI output (e.g. claude's input box) won't reconstruct
+// perfectly — but plain text and message bodies come through cleanly.
+function stripAnsi(s: string): string {
+  return s
+    .replace(/\x1b\[[\d;?]*[a-zA-Z]/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1b[PX^_][\s\S]*?\x1b\\/g, '')
+    .replace(/\x1b[=>()*+\-.\/]./g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+}
+
+type FindSessionResult =
+  | { found: true; session: Session }
+  | { found: false; error: string }
+
+function findSessionByIdOrPrefix(idOrPrefix: string): FindSessionResult {
+  const direct = sessions.get(idOrPrefix)
+  if (direct) return { found: true, session: direct }
+  const matches = Array.from(sessions.values()).filter((s) =>
+    s.id.startsWith(idOrPrefix),
+  )
+  if (matches.length === 1) return { found: true, session: matches[0] }
+  if (matches.length === 0) {
+    return { found: false, error: `No session found for "${idOrPrefix}"` }
+  }
+  return {
+    found: false,
+    error: `Ambiguous prefix "${idOrPrefix}" — matches ${matches.length} sessions`,
+  }
 }
 
 type StartupSession = {
@@ -308,12 +350,23 @@ function createSessionInternal(opts: {
   }
   console.log(`[termhub] pty.spawn returned (pid=${term.pid})`)
 
+  const session: Session = {
+    id,
+    cwd: opts.cwd,
+    command: opts.command,
+    term,
+    outputBuffer: '',
+  }
+  sessions.set(id, session)
+  persistSessions()
+
   let firstData = true
   term.onData((data) => {
     if (firstData) {
       firstData = false
       console.log(`[termhub] first data from ${id.slice(0, 8)} (${data.length} bytes)`)
     }
+    session.outputBuffer = appendToBuffer(session.outputBuffer, data)
     mainWindow?.webContents.send('session:data', { id, data })
   })
 
@@ -323,9 +376,6 @@ function createSessionInternal(opts: {
     sessions.delete(id)
     persistSessions()
   })
-
-  sessions.set(id, { id, cwd: opts.cwd, command: opts.command, term })
-  persistSessions()
 
   if (opts.command && opts.command.trim().length > 0) {
     let finalCommand: string
@@ -466,6 +516,30 @@ app.whenReady().then(async () => {
             dangerouslySkipPermissions,
             source: 'mcp',
           }),
+        sendInput: ({ sessionId, text }) => {
+          const result = findSessionByIdOrPrefix(sessionId)
+          if (!result.found) return { ok: false, error: result.error }
+          const sanitized = text.replace(/\r?\n+/g, ' ')
+          try {
+            result.session.term.write(`${sanitized}\r`)
+            return { ok: true }
+          } catch (err) {
+            return {
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+            }
+          }
+        },
+        readOutput: ({ sessionId, maxChars, raw }) => {
+          const result = findSessionByIdOrPrefix(sessionId)
+          if (!result.found) return { error: result.error }
+          let text = result.session.outputBuffer
+          if (!raw) text = stripAnsi(text)
+          if (typeof maxChars === 'number' && maxChars > 0 && text.length > maxChars) {
+            text = text.slice(text.length - maxChars)
+          }
+          return { text }
+        },
       },
     })
   } catch (err) {

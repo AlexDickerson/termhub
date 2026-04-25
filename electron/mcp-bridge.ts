@@ -92,7 +92,7 @@ async function main() {
           content: [
             {
               type: 'text',
-              text: `Opened session ${result.id.slice(0, 8)} in ${result.cwd}`,
+              text: `Opened session ${result.id} in ${result.cwd}`,
             },
           ],
         }
@@ -102,6 +102,107 @@ async function main() {
           content: [
             { type: 'text', text: `Failed to reach termhub at ${baseUrl}: ${msg}` },
           ],
+          isError: true,
+        }
+      }
+    },
+  )
+
+  server.registerTool(
+    'send_input',
+    {
+      title: 'Send input to a running termhub session',
+      description:
+        'Writes text to the pty of an existing session, as if the user typed it. ' +
+        "Trailing Enter is added automatically. Newlines in `text` are flattened to " +
+        'spaces — for multi-line content, send multiple calls or paste-style input.',
+      inputSchema: {
+        sessionId: z
+          .string()
+          .describe('Full session id (or unambiguous prefix) returned by open_session'),
+        text: z.string().describe('Text to send to the session'),
+      },
+    },
+    async (args) => {
+      try {
+        const response = await fetch(`${baseUrl}/internal/send_input`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: args.sessionId, text: args.text }),
+        })
+        const json = (await response.json().catch(() => ({}))) as {
+          ok?: boolean
+          error?: string
+        }
+        if (!response.ok || !json.ok) {
+          return {
+            content: [
+              { type: 'text', text: `Failed: ${json.error ?? `HTTP ${response.status}`}` },
+            ],
+            isError: true,
+          }
+        }
+        return { content: [{ type: 'text', text: `Sent to ${args.sessionId}.` }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return {
+          content: [{ type: 'text', text: `Failed to reach termhub: ${msg}` }],
+          isError: true,
+        }
+      }
+    },
+  )
+
+  server.registerTool(
+    'read_output',
+    {
+      title: 'Read recent output from a termhub session',
+      description:
+        'Returns the most recent output buffered for a session (rolling, last ~256KB). ' +
+        'ANSI escape sequences are stripped by default for readability; pass raw: true to ' +
+        'get the original byte stream.',
+      inputSchema: {
+        sessionId: z
+          .string()
+          .describe('Full session id (or unambiguous prefix) returned by open_session'),
+        maxChars: z
+          .number()
+          .optional()
+          .describe('Cap on returned characters (returns the most recent)'),
+        raw: z
+          .boolean()
+          .optional()
+          .describe('If true, return raw output including ANSI escape codes'),
+      },
+    },
+    async (args) => {
+      try {
+        const response = await fetch(`${baseUrl}/internal/read_output`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: args.sessionId,
+            maxChars: args.maxChars,
+            raw: args.raw,
+          }),
+        })
+        const json = (await response.json().catch(() => ({}))) as {
+          text?: string
+          error?: string
+        }
+        if (json.error) {
+          return {
+            content: [{ type: 'text', text: `Failed: ${json.error}` }],
+            isError: true,
+          }
+        }
+        return {
+          content: [{ type: 'text', text: json.text ?? '(no output)' }],
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return {
+          content: [{ type: 'text', text: `Failed to reach termhub: ${msg}` }],
           isError: true,
         }
       }
