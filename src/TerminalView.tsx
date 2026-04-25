@@ -87,11 +87,14 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
       // Intercepting the key here and returning false suppresses that encoding
       // and substitutes a custom byte sequence that Claude Code does not
       // recognise, causing it to submit instead of inserting a newline.
+      // Flag set in the key handler; consumed by the next onData call so we
+      // can see exactly what byte(s) xterm emits for Shift+Enter.
+      let nextDataIsShiftEnter = false
+
       term.attachCustomKeyEventHandler((e) => {
-        // Diagnostic: log every Shift+Enter keydown so we can see (a) whether
-        // the handler fires and (b) what bytes xterm emits for it via onData.
         if (e.type === 'keydown' && e.shiftKey && e.key === 'Enter') {
-          console.log('[termhub] Shift+Enter keydown — ctrl:', e.ctrlKey, '— letting xterm encode')
+          nextDataIsShiftEnter = true
+          console.log('[termhub key] Shift+Enter ↓  ctrl=%s — returning true (xterm handles)', e.ctrlKey)
         }
 
         // Ctrl+C / Ctrl+V: clipboard copy and paste.
@@ -134,10 +137,11 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
       // cursor-positioning corruption (broken tab completion, TUIs that
       // overwrite themselves instead of scrolling).
       term.onData((data) => {
-        // Diagnostic: log bytes as hex around the time of a Shift+Enter so we
-        // can see exactly what xterm is sending to the PTY.
-        const hex = Array.from(data).map(c => c.codePointAt(0)!.toString(16).padStart(2, '0')).join(' ')
-        console.log(`[termhub] onData → ${JSON.stringify(data)}  [${hex}]`)
+        if (nextDataIsShiftEnter) {
+          nextDataIsShiftEnter = false
+          const hex = Array.from(data).map(c => c.codePointAt(0)!.toString(16).padStart(2, '0')).join(' ')
+          console.log(`[termhub data] Shift+Enter → hex: ${hex}`)
+        }
         window.termhub.sendInput(session.id, data)
       })
       term.onResize(({ cols, rows }) => {
