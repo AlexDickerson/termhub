@@ -305,10 +305,21 @@ function bracketedPasteWithSubmit(text: string): string {
   return `\x1b[200~${text}\x1b[201~\r`
 }
 
+// CLAUDE_* / CLAUDECODE / similar vars from a parent claude session leak
+// into spawned child claudes and confuse them — e.g.
+// CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1 trips the sandbox preflight and
+// makes claude refuse to start. Always strip these so the child boots
+// from a clean baseline.
+const PARENT_CLAUDE_ENV_PREFIXES = ['CLAUDE_', 'CLAUDECODE']
+const PARENT_CLAUDE_ENV_EXACT = new Set(['DEFAULT_LLM_MODEL'])
+
 function cleanEnv(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
-    if (typeof v === 'string') out[k] = v
+    if (typeof v !== 'string') continue
+    if (PARENT_CLAUDE_ENV_EXACT.has(k)) continue
+    if (PARENT_CLAUDE_ENV_PREFIXES.some((p) => k.startsWith(p))) continue
+    out[k] = v
   }
   return out
 }
