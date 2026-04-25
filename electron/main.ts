@@ -25,6 +25,10 @@ import {
   registerAppHandlers,
   setMainWindow as setAppHandlersMainWindow,
 } from './ipc-app'
+import {
+  registerPrHandlers,
+  setMainWindowForPr,
+} from './ipc-pr'
 
 // Isolate dev builds so their sessions, config, and MCP port don't bleed
 // into the production instance running alongside. Must run before the
@@ -104,11 +108,13 @@ function createWindow(): void {
     mainWindow = null
     setMainWindow(null)
     setAppHandlersMainWindow(null)
+    setMainWindowForPr(null)
   })
 
   // Wire the new BrowserWindow into modules that broadcast events to it.
   setMainWindow(mainWindow)
   setAppHandlersMainWindow(mainWindow)
+  setMainWindowForPr(mainWindow)
 }
 
 // Renderer signals readiness via 'app:ready' once it has subscribed to
@@ -275,6 +281,7 @@ app.whenReady().then(async () => {
   registerSessionHandlers()
   registerDiscoveryHandlers()
   registerAppHandlers({ config })
+  registerPrHandlers()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
