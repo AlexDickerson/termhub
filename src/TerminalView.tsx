@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { Session } from './types'
 import type { TerminalEntry } from './App'
+import { shiftEnterSequence } from './keyHandlers'
 
 type Props = {
   session: Session
@@ -105,11 +106,16 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
         return false
       })
 
-      // Shift+Enter: send ESC+CR which Claude Code's CLI interprets as
-      // "newline without submit" (equivalent to Meta+Enter).
+      // Shift+Enter: send the modifyOtherKeys CSI sequence (\x1b[27;2;13~)
+      // which Claude Code's input parser recognises as "insert newline"
+      // regardless of whether there is already text in the input buffer.
+      // The previous \x1b\r (ESC+CR / Meta+Enter) only worked when the
+      // buffer was empty because Claude Code's readline-style parser treats
+      // ESC+CR differently depending on buffered input state.
       term.attachCustomKeyEventHandler((ev: KeyboardEvent) => {
-        if (ev.shiftKey && ev.key === 'Enter' && ev.type === 'keydown') {
-          window.termhub.sendInput(session.id, '\x1b\r')
+        const seq = shiftEnterSequence(ev)
+        if (seq !== null) {
+          window.termhub.sendInput(session.id, seq)
           return false  // suppress xterm default handling
         }
         return true
