@@ -12,6 +12,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
+import { MCP_ROUTES } from './mcp-routes'
 
 const port = Number.parseInt(process.env.TERMHUB_PORT ?? '7787', 10)
 const baseUrl = `http://127.0.0.1:${port}`
@@ -99,7 +100,7 @@ async function main() {
     },
     async (args) => {
       try {
-        const response = await fetch(`${baseUrl}/internal/open_session`, {
+        const response = await fetch(`${baseUrl}${MCP_ROUTES.OPEN_SESSION}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -163,7 +164,7 @@ async function main() {
     },
     async (args) => {
       try {
-        const response = await fetch(`${baseUrl}/internal/send_input`, {
+        const response = await fetch(`${baseUrl}${MCP_ROUTES.SEND_INPUT}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionId: args.sessionId, text: args.text }),
@@ -215,7 +216,7 @@ async function main() {
     },
     async (args) => {
       try {
-        const response = await fetch(`${baseUrl}/internal/read_output`, {
+        const response = await fetch(`${baseUrl}${MCP_ROUTES.READ_OUTPUT}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

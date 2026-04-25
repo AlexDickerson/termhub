@@ -50,6 +50,26 @@ type Session = {
 
 const MAX_OUTPUT_BUFFER_BYTES = 256 * 1024
 
+// Validate cols/rows from the renderer and forward to a PTY. Both the primary
+// (claude) and the secondary (shell) PTYs receive resize requests on every UI
+// resize / divider drag, so this gets called frequently. Non-finite values
+// from the renderer (NaN, Infinity) are silently dropped; resize errors from
+// an already-exited PTY are swallowed because they race against shutdown.
+//
+// Duck-typed on `resize` so unit tests can pass a plain object instead of a
+// real PTY. Exported only for tests.
+type PtyResizeTarget = { resize: (cols: number, rows: number) => void }
+export function resizePty(target: PtyResizeTarget, cols: number, rows: number): void {
+  if (!Number.isFinite(cols) || !Number.isFinite(rows)) return
+  const c = Math.max(1, Math.floor(cols))
+  const r = Math.max(1, Math.floor(rows))
+  try {
+    target.resize(c, r)
+  } catch {
+    // pty may have exited between resize requests
+  }
+}
+
 function appendToBuffer(buf: string, chunk: string): string {
   const combined = buf + chunk
   if (combined.length <= MAX_OUTPUT_BUFFER_BYTES) return combined
@@ -841,15 +861,13 @@ app.whenReady().then(async () => {
   // Bootstrap once the renderer is listening
   rendererReady.then(() => bootstrapSessions(config))
 
+  // Renderer-spawned sessions are plain shells rooted at the picked folder.
+  // Claude sessions are launched via startup config, restored on resume, or
+  // opened via the MCP `open_session` tool — never from the renderer.
   ipcMain.handle(
     'session:create',
-    (_event, opts: { cwd: string; command?: string; prompt?: string }) =>
-      createSessionInternal({
-        cwd: opts.cwd,
-        command: opts.command,
-        prompt: opts.prompt,
-        source: 'ipc',
-      }),
+    (_event, opts: { cwd: string }) =>
+      createSessionInternal({ cwd: opts.cwd, source: 'ipc' }),
   )
 
   ipcMain.on('session:input', (_event, payload: { id: string; data: string }) => {
@@ -861,14 +879,7 @@ app.whenReady().then(async () => {
     (_event, payload: { id: string; cols: number; rows: number }) => {
       const s = sessions.get(payload.id)
       if (!s) return
-      if (!Number.isFinite(payload.cols) || !Number.isFinite(payload.rows)) return
-      const cols = Math.max(1, Math.floor(payload.cols))
-      const rows = Math.max(1, Math.floor(payload.rows))
-      try {
-        s.term.resize(cols, rows)
-      } catch {
-        // pty may have exited between resize requests
-      }
+      resizePty(s.term, payload.cols, payload.rows)
     },
   )
 
@@ -905,14 +916,7 @@ app.whenReady().then(async () => {
     (_event, payload: { id: string; cols: number; rows: number }) => {
       const s = sessions.get(payload.id)
       if (!s) return
-      if (!Number.isFinite(payload.cols) || !Number.isFinite(payload.rows)) return
-      const cols = Math.max(1, Math.floor(payload.cols))
-      const rows = Math.max(1, Math.floor(payload.rows))
-      try {
-        s.shellTerm.resize(cols, rows)
-      } catch {
-        // pty may have exited between resize requests
-      }
+      resizePty(s.shellTerm, payload.cols, payload.rows)
     },
   )
 

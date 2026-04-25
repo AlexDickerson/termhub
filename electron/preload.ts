@@ -20,12 +20,8 @@ type AddedPayload = {
 }
 
 const api = {
-  createSession: (
-    cwd: string,
-    command?: string,
-    prompt?: string,
-  ): Promise<{ id: string; cwd: string }> =>
-    ipcRenderer.invoke('session:create', { cwd, command, prompt }),
+  createSession: (cwd: string): Promise<{ id: string; cwd: string }> =>
+    ipcRenderer.invoke('session:create', { cwd }),
 
   sendInput: (id: string, data: string): void => {
     ipcRenderer.send('session:input', { id, data })
