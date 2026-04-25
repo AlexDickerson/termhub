@@ -8,6 +8,8 @@ type AddedPayload = {
   autoActivate?: boolean
   command?: string
   name?: string
+  repoRoot?: string
+  repoLabel?: string
 }
 type AgentDef = { name: string; path: string; description?: string }
 
@@ -96,10 +98,12 @@ const api = {
       autoActivate: boolean,
       command?: string,
       name?: string,
+      repoRoot?: string,
+      repoLabel?: string,
     ) => void,
   ): (() => void) => {
     const handler = (_e: Electron.IpcRendererEvent, p: AddedPayload) =>
-      cb(p.id, p.cwd, p.autoActivate ?? false, p.command, p.name)
+      cb(p.id, p.cwd, p.autoActivate ?? false, p.command, p.name, p.repoRoot, p.repoLabel)
     ipcRenderer.on('session:added', handler)
     return () => {
       ipcRenderer.off('session:added', handler)
@@ -107,7 +111,7 @@ const api = {
   },
 
   listSessions: (): Promise<
-    Array<{ id: string; cwd: string; command?: string; name?: string }>
+    Array<{ id: string; cwd: string; command?: string; name?: string; repoRoot?: string; repoLabel?: string }>
   > => ipcRenderer.invoke('sessions:list'),
 
   appReady: (): void => {
