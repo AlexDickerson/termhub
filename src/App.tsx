@@ -4,12 +4,13 @@ import type { FitAddon } from '@xterm/addon-fit'
 import { Sidebar } from './Sidebar'
 import { TerminalView } from './TerminalView'
 import { RightPanel } from './RightPanel'
-import type { Session } from './types'
+import type { Session, SessionStatus } from './types'
 
 export type TerminalEntry = { term: Terminal; fit: FitAddon }
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([])
+  const [statuses, setStatuses] = useState<Record<string, SessionStatus>>({})
   const [activeId, setActiveId] = useState<string | null>(null)
   const termsRef = useRef(new Map<string, TerminalEntry>())
   const pendingDataRef = useRef(new Map<string, string[]>())
@@ -25,8 +26,18 @@ export default function App() {
         pendingDataRef.current.set(id, queue)
       }
     })
-    const offExit = window.termhub.onExit((id) => {
-      removeSession(id)
+    const offExit = window.termhub.onExit((id, exitCode) => {
+      // Keep failed sessions visible so the red status dot is observable.
+      // They can still be dismissed via the × button. Clean exits remove
+      // the row immediately as before.
+      if (exitCode === 0) {
+        removeSession(id)
+      }
+    })
+    const offStatus = window.termhub.onStatusChanged((id, status) => {
+      setStatuses((prev) =>
+        prev[id] === status ? prev : { ...prev, [id]: status },
+      )
     })
     const offAdded = window.termhub.onSessionAdded(
       (id, cwd, autoActivate, command, name) => {
@@ -58,6 +69,7 @@ export default function App() {
     return () => {
       offData()
       offExit()
+      offStatus()
       offAdded()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -70,6 +82,12 @@ export default function App() {
       termsRef.current.delete(id)
     }
     setSessions((prev) => prev.filter((s) => s.id !== id))
+    setStatuses((prev) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
     setActiveId((curr) => {
       if (curr !== id) return curr
       // Pick the next remaining session, if any
@@ -143,6 +161,7 @@ export default function App() {
       <Sidebar
         groups={grouped}
         activeId={activeId}
+        statuses={statuses}
         onNew={newSession}
         onSelect={setActiveId}
         onClose={closeSession}

@@ -1,14 +1,29 @@
-import type { Session } from './types'
+import type { Session, SessionStatus } from './types'
 
 type Props = {
   groups: Map<string, Session[]>
   activeId: string | null
+  statuses: Record<string, SessionStatus>
   onNew: () => void
   onSelect: (id: string) => void
   onClose: (id: string) => void
 }
 
-export function Sidebar({ groups, activeId, onNew, onSelect, onClose }: Props) {
+const STATUS_LABEL: Record<SessionStatus, string> = {
+  working: 'Working',
+  awaiting: 'Awaiting input',
+  idle: 'Idle',
+  failed: 'Failed',
+}
+
+export function Sidebar({
+  groups,
+  activeId,
+  statuses,
+  onNew,
+  onSelect,
+  onClose,
+}: Props) {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -24,13 +39,20 @@ export function Sidebar({ groups, activeId, onNew, onSelect, onClose }: Props) {
               {shortenPath(cwd)}
             </div>
             <ul className="group-list">
-              {list.map((s, idx) => (
+              {list.map((s, idx) => {
+                const status = statuses[s.id] ?? 'idle'
+                return (
                 <li
                   key={s.id}
                   className={`item ${s.id === activeId ? 'active' : ''}`}
                   onClick={() => onSelect(s.id)}
                 >
                   <span className="item-label">
+                    <span
+                      className={`status-dot status-${status}`}
+                      title={STATUS_LABEL[status]}
+                      aria-label={STATUS_LABEL[status]}
+                    />
                     {s.name ? (
                       s.name
                     ) : (
@@ -51,7 +73,8 @@ export function Sidebar({ groups, activeId, onNew, onSelect, onClose }: Props) {
                     ×
                   </button>
                 </li>
-              ))}
+                )
+              })}
             </ul>
           </div>
         ))}

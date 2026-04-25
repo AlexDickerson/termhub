@@ -126,6 +126,37 @@ body,
   text-overflow: ellipsis;
 }
 
+/* ---------- Session status dot ---------- */
+
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  flex-shrink: 0;
+  background: var(--text-dim);
+}
+
+.status-dot.status-working {
+  background: #4aa3ff; /* blue */
+  box-shadow: 0 0 4px rgba(74, 163, 255, 0.6);
+}
+
+.status-dot.status-awaiting {
+  background: #e3b341; /* yellow */
+  box-shadow: 0 0 4px rgba(227, 179, 65, 0.5);
+}
+
+.status-dot.status-idle {
+  background: #3fb950; /* green */
+}
+
+.status-dot.status-failed {
+  background: #f85149; /* red */
+}
+
 .item-num {
   color: var(--text-dim);
   margin-left: 4px;
