@@ -73,6 +73,7 @@ export type TermhubApi = {
   listSkills: () => Promise<SkillDef[]>
   openSkill: (path: string) => Promise<void>
   renameSession: (id: string, name: string) => Promise<void>
+  openInVSCode: (cwd: string) => Promise<void>
 }
 
 declare global {
