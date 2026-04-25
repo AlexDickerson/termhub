@@ -26,6 +26,9 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
       const raf = requestAnimationFrame(() => {
         try {
           existing.fit.fit()
+          // Scroll to bottom after fit so the scrollbar extent is current before
+          // we jump — otherwise xterm may not be able to reach the last line.
+          existing.term.scrollToBottom()
           existing.term.focus()
         } catch {
           // ignore
@@ -129,6 +132,22 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
         window.termhub.resize(session.id, cols, rows)
       })
 
+      // Snap-to-bottom fix: xterm's internal pixel rounding can leave the
+      // scrollbar 1 line short of ybase when the user scrolls down after new
+      // output has arrived while they were scrolled up.  When the viewport
+      // moves downward and gets within 1 line of ybase, snap all the way to
+      // the bottom so the final line is always reachable.
+      // We only fire when scrolling downward (newYdisp > prevYdisp) to avoid
+      // fighting the user when they intentionally scroll up from the bottom.
+      let prevYdisp = 0
+      term.onScroll((newYdisp) => {
+        const ybase = term.buffer.active.baseY
+        if (newYdisp > prevYdisp && newYdisp >= ybase - 1 && newYdisp < ybase) {
+          term.scrollToBottom()
+        }
+        prevYdisp = newYdisp
+      })
+
       term.open(container)
       try {
         fit.fit()
@@ -147,6 +166,9 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
         for (const data of queue) term.write(data)
         pendingDataRef.current.delete(session.id)
       }
+      // Land at the bottom of any buffered content on first mount so the user
+      // sees the latest output rather than the top of a filled scrollback.
+      term.scrollToBottom()
     })
 
     return () => {
@@ -154,6 +176,46 @@ export function TerminalView({ session, isActive, termsRef, pendingDataRef }: Pr
       cancelAnimationFrame(raf)
     }
   }, [isActive, session.id, termsRef, pendingDataRef])
+
+  // ResizeObserver: re-fit when the container changes size due to layout
+  // changes (sidebar toggle, right panel show/hide, session switch, etc.).
+  // Without this, only window resize triggers FitAddon and the scrollbar
+  // falls out of sync with actual content.
+  // rAF throttling avoids per-pixel calls during animated resizes.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    let rafId: number | null = null
+    const observer = new ResizeObserver(() => {
+      if (rafId !== null) return
+      rafId = requestAnimationFrame(() => {
+        rafId = null
+        const entry = termsRef.current.get(session.id)
+        if (!entry) return
+        const prevCols = entry.term.cols
+        const prevRows = entry.term.rows
+        try {
+          entry.fit.fit()
+        } catch {
+          // ignore — container may be zero-size during hide transition
+        }
+        const newCols = entry.term.cols
+        const newRows = entry.term.rows
+        if (newCols !== prevCols || newRows !== prevRows) {
+          console.info(
+            `[termhub:terminal] session ${session.id.slice(0, 8)} resized ${prevCols}x${prevRows} -> ${newCols}x${newRows}`,
+          )
+        }
+      })
+    })
+
+    observer.observe(container)
+    return () => {
+      observer.disconnect()
+      if (rafId !== null) cancelAnimationFrame(rafId)
+    }
+  }, [session.id, termsRef])
 
   // Dispose only on unmount (not on every isActive flip).
   useEffect(() => {
