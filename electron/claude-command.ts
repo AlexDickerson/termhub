@@ -99,14 +99,18 @@ type PtyWriteTarget = { write: (data: string) => void }
 // appears in claude's input box but is never submitted, intermittently.
 //
 // `schedule` is injectable for tests — production callers should let it
-// default to setTimeout(cb, 50). 50ms is plenty for Ink's React
-// reconciler to commit the paste, and small enough that the user sees
-// no lag between paste and submit.
+// default to setTimeout(cb, 250). 250ms is comfortably more than Ink's
+// reconciler frame budget (~16ms) AND survives OS-level pty write
+// batching that can collapse adjacent writes into a single read at the
+// child end. 50ms was enough in isolation but lost the race when 10
+// sessions hit the timer simultaneously and the kernel batched their
+// writes; 250ms is the empirically-comfortable margin without being
+// noticeable as lag.
 export function writeBracketedPasteAndSubmit(
   target: PtyWriteTarget,
   text: string,
   schedule: (cb: () => void) => void = (cb) => {
-    setTimeout(cb, 50)
+    setTimeout(cb, 250)
   },
 ): void {
   target.write(bracketedPaste(text))

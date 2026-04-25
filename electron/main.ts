@@ -273,11 +273,56 @@ function createSessionInternal(opts: {
   // reading happens to equal the initial 'working' default.
   setStatus(session, session.status)
 
+  // Initial-prompt delivery. We need claude's TUI to be fully booted before
+  // we paste — otherwise Ink hasn't wired its bracketed-paste handler yet
+  // and the prompt either lands as raw chars (rare) or, more often,
+  // arrives WITH bracketed-paste mode active but BEFORE the submit-on-CR
+  // handler is ready, which leaves the text in the input box without
+  // submitting. Manifests dramatically when many sessions spawn at once
+  // (CPU/IO contention extends startup time).
+  //
+  // Strategy: hook the JSONL watcher's first emission as the readiness
+  // signal — claude has progressed far enough to write its session file,
+  // which is well past Ink's mount. Add a 500 ms grace for the first
+  // render to settle, then paste. Fall back to a generous timer (12 s) in
+  // case claude never writes its JSONL (old version, hard failure).
+  // For non-claude commands, no prompt path is meaningful — guarded above.
+  let promptSent = false
+  const sendPromptOnce = () => {
+    if (promptSent) return
+    if (!sessions.has(id)) return
+    if (!opts.prompt || opts.prompt.length === 0) return
+    promptSent = true
+    writeBracketedPasteAndSubmit(session.term, opts.prompt)
+  }
+  const wantsPrompt =
+    opts.source !== 'resume' && opts.prompt !== undefined && opts.prompt.length > 0
+  if (wantsPrompt) {
+    setTimeout(() => {
+      if (!promptSent) {
+        console.warn(
+          `[termhub:session] ${id.slice(0, 8)} JSONL readiness fallback fired (12s) — sending prompt anyway`,
+        )
+        sendPromptOnce()
+      }
+    }, 12000)
+  }
+
   // Watch the Claude Code JSONL file for ground-truth status updates. The
   // file is created by Claude Code shortly after startup; the watcher polls
   // and will begin emitting once the file appears.
   if (opts.command && isClaudeCommand(opts.command)) {
+    let firstStatusSeen = false
     session.jsonlWatcher = watchSessionStatus(id, (next) => {
+      if (!firstStatusSeen) {
+        firstStatusSeen = true
+        // Claude has written its JSONL — TUI is past mount. One more render
+        // tick (500 ms) covers Ink's first paint of the input prompt before
+        // we deliver the bracketed paste.
+        if (wantsPrompt) {
+          setTimeout(sendPromptOnce, 500)
+        }
+      }
       // 'failed' is only set on PTY exit — never override it from JSONL.
       if (session.status !== 'failed') {
         setStatus(session, next)
@@ -352,18 +397,6 @@ function createSessionInternal(opts: {
     setTimeout(() => {
       if (sessions.has(id)) term.write(`${finalCommand}\r`)
     }, 150)
-  }
-
-  // Send the prompt to claude's TUI as a bracketed paste, after it's had
-  // time to start. This avoids cmd.exe's quoting limits for prompts with
-  // embedded quotes, backticks, $(), <>, etc.
-  if (opts.source !== 'resume' && opts.prompt && opts.prompt.length > 0) {
-    const text = opts.prompt
-    setTimeout(() => {
-      if (sessions.has(id)) {
-        writeBracketedPasteAndSubmit(session.term, text)
-      }
-    }, 2500)
   }
 
   if (opts.source !== 'ipc') {
