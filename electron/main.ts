@@ -155,18 +155,6 @@ function listSkills(): SkillDef[] {
   return out
 }
 
-function loadAgentBody(name: string): string | null {
-  const filePath = path.join(getAgentsDir(), `${name}.md`)
-  try {
-    const content = fs.readFileSync(filePath, 'utf8')
-    const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n([\s\S]*)$/.exec(content)
-    return (m ? m[1] : content).trim()
-  } catch (err) {
-    console.error(`[termhub] failed to load agent "${name}":`, err)
-    return null
-  }
-}
-
 function persistSessions() {
   const list: PersistedSession[] = Array.from(sessions.values()).map((s) => ({
     id: s.id,
@@ -246,7 +234,7 @@ function quoteForCmd(s: string): string {
 
 function buildClaudeCommand(opts: {
   sessionId: string
-  agentBody?: string
+  agent?: string
   userPrompt?: string
   resume?: boolean
 }): string {
@@ -256,8 +244,8 @@ function buildClaudeCommand(opts: {
     return `claude ${flags.join(' ')}`
   }
   flags.push(`--session-id "${opts.sessionId}"`)
-  if (opts.agentBody && opts.agentBody.length > 0) {
-    flags.push(`--append-system-prompt ${quoteForCmd(opts.agentBody)}`)
+  if (opts.agent && opts.agent.length > 0) {
+    flags.push(`--agent "${opts.agent}"`)
   }
   let cmd = `claude ${flags.join(' ')}`
   if (opts.userPrompt && opts.userPrompt.length > 0) {
@@ -324,18 +312,9 @@ function createSessionInternal(opts: {
   if (opts.command && opts.command.trim().length > 0) {
     let finalCommand: string
     if (isClaudeCommand(opts.command)) {
-      let agentBody: string | undefined
-      if (opts.source !== 'resume' && opts.agent) {
-        const body = loadAgentBody(opts.agent)
-        if (body) {
-          agentBody = body
-        } else {
-          console.warn(`[termhub] agent "${opts.agent}" not found in ${getAgentsDir()}`)
-        }
-      }
       finalCommand = buildClaudeCommand({
         sessionId: id,
-        agentBody,
+        agent: opts.source !== 'resume' ? opts.agent : undefined,
         userPrompt: opts.source !== 'resume' ? opts.prompt : undefined,
         resume: opts.source === 'resume',
       })
