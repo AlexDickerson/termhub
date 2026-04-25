@@ -11,6 +11,9 @@ type Session = {
   cwd: string
   command?: string
   name?: string
+  model?: string
+  permissionMode?: string
+  dangerouslySkipPermissions?: boolean
   term: pty.IPty
   outputBuffer: string
 }
@@ -77,6 +80,9 @@ type PersistedSession = {
   cwd: string
   command?: string
   name?: string
+  model?: string
+  permissionMode?: string
+  dangerouslySkipPermissions?: boolean
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -125,7 +131,11 @@ function loadPersistedSessions(): PersistedSession[] {
         typeof s.id === 'string' &&
         typeof s.cwd === 'string' &&
         (s.command === undefined || typeof s.command === 'string') &&
-        (s.name === undefined || typeof s.name === 'string'),
+        (s.name === undefined || typeof s.name === 'string') &&
+        (s.model === undefined || typeof s.model === 'string') &&
+        (s.permissionMode === undefined || typeof s.permissionMode === 'string') &&
+        (s.dangerouslySkipPermissions === undefined ||
+          typeof s.dangerouslySkipPermissions === 'boolean'),
     )
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -223,6 +233,9 @@ function persistSessions() {
     cwd: s.cwd,
     command: s.command,
     name: s.name,
+    model: s.model,
+    permissionMode: s.permissionMode,
+    dangerouslySkipPermissions: s.dangerouslySkipPermissions,
   }))
   try {
     fs.mkdirSync(path.dirname(getSessionsPath()), { recursive: true })
@@ -331,12 +344,13 @@ function bracketedPasteWithSubmit(text: string): string {
   return `\x1b[200~${text}\x1b[201~\r`
 }
 
-// CLAUDE_* / CLAUDECODE / similar vars from a parent claude session leak
-// into spawned child claudes and confuse them — e.g.
-// CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1 trips the sandbox preflight and
-// makes claude refuse to start. Always strip these so the child boots
-// from a clean baseline.
-const PARENT_CLAUDE_ENV_PREFIXES = ['CLAUDE_', 'CLAUDECODE']
+// CLAUDE_* / CLAUDECODE / OPERON_* vars from a parent claude session leak
+// into spawned child claudes and confuse them. In particular,
+// OPERON_SANDBOXED_NETWORK=1 (set by claude desktop's sandbox runtime)
+// makes the spawned claude assert that a sandbox is required even when
+// settings.json has sandbox.failIfUnavailable: false. Strip these so the
+// child boots from a clean baseline.
+const PARENT_CLAUDE_ENV_PREFIXES = ['CLAUDE_', 'CLAUDECODE', 'OPERON_']
 const PARENT_CLAUDE_ENV_EXACT = new Set(['DEFAULT_LLM_MODEL'])
 
 function cleanEnv(): Record<string, string> {
@@ -387,6 +401,9 @@ function createSessionInternal(opts: {
     cwd: opts.cwd,
     command: opts.command,
     name: opts.name,
+    model: opts.model,
+    permissionMode: opts.permissionMode,
+    dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
     term,
     outputBuffer: '',
   }
@@ -515,6 +532,9 @@ function bootstrapSessions(config: Config) {
         cwd: s.cwd,
         command: s.command,
         name: s.name,
+        model: s.model,
+        permissionMode: s.permissionMode,
+        dangerouslySkipPermissions: s.dangerouslySkipPermissions,
         source: 'resume',
       })
       occupiedCwds.add(s.cwd)
