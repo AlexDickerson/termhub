@@ -43,6 +43,15 @@ export type StartupSession = {
 export type Config = {
   mcpPort: number
   startupSessions: StartupSession[]
+  paste: {
+    secretFilterEnabled: boolean
+  }
+}
+
+export type SecretFinding = {
+  ruleId: string
+  message: string
+  matchedText: string
 }
 
 export type SessionPr = {
@@ -54,6 +63,8 @@ export type SessionPr = {
 }
 
 export type TermhubApi = {
+  scanClipboardForSecrets: (text: string) => Promise<SecretFinding[]>
+  setPasteSecretFilter: (enabled: boolean) => Promise<void>
   createSession: (cwd: string) => Promise<{ id: string; cwd: string }>
   sendInput: (id: string, data: string) => void
   resize: (id: string, cols: number, rows: number) => void

@@ -26,6 +26,9 @@ export const DEFAULT_CONFIG: Config = {
       name: 'orchestrator',
     },
   ],
+  paste: {
+    secretFilterEnabled: true,
+  },
 }
 
 export function getConfigPath(): string {
@@ -40,6 +43,16 @@ export function getSessionsPath(): string {
   return path.join(app.getPath('userData'), 'sessions.json')
 }
 
+export function writeConfig(config: Config): void {
+  const configPath = getConfigPath()
+  try {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2))
+  } catch (err) {
+    console.error('[termhub] failed to write config:', err)
+  }
+}
+
 // Reads ~/AppData/.../termhub/config.json; on first run, writes
 // DEFAULT_CONFIG so the user has something to edit. Errors fall back to
 // the in-memory DEFAULT_CONFIG without surfacing.
@@ -48,7 +61,10 @@ export function loadConfig(): Config {
   try {
     const raw = fs.readFileSync(configPath, 'utf8')
     const parsed = JSON.parse(raw) as Partial<Config>
-    return { ...DEFAULT_CONFIG, ...parsed }
+    const merged = { ...DEFAULT_CONFIG, ...parsed }
+    // Deep-merge nested objects so missing sub-keys fall back to defaults.
+    merged.paste = { ...DEFAULT_CONFIG.paste, ...(parsed.paste ?? {}) }
+    return merged
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       try {
