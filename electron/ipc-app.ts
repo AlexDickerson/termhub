@@ -11,7 +11,8 @@ import * as os from 'node:os'
 import { spawn } from 'node:child_process'
 import type { Config } from '../src/types'
 import { isAllowedExternalUrl } from './links'
-import { getConfigPath } from './config'
+import { getConfigPath, writeConfig } from './config'
+import { scanForSecrets } from './secret-scanner'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -55,6 +56,21 @@ export function registerAppHandlers(opts: { config: Config }): void {
   ipcMain.handle('clipboard:read', () => clipboard.readText())
   ipcMain.on('clipboard:write', (_event, text: string) => {
     clipboard.writeText(text)
+  })
+
+  ipcMain.handle('secrets:scan', async (_event, text: string) => {
+    try {
+      return await scanForSecrets(text)
+    } catch (err) {
+      console.error('[termhub:paste-filter] scan error:', err)
+      return []
+    }
+  })
+
+  ipcMain.handle('config:setPasteFilter', (_event, enabled: boolean) => {
+    opts.config.paste = { secretFilterEnabled: enabled }
+    writeConfig(opts.config)
+    console.info(`[termhub:paste-filter] secretFilterEnabled set to ${enabled}`)
   })
 
   ipcMain.on('open-external', (_event, url: string) => {

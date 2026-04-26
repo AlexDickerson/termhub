@@ -7,9 +7,11 @@ import type { Session } from './types'
 
 type Props = {
   activeSession: Session | null
+  secretFilterEnabled: boolean
+  onSecretFilterToggle: (enabled: boolean) => void
 }
 
-export function RightPanel({ activeSession }: Props) {
+export function RightPanel({ activeSession, secretFilterEnabled, onSecretFilterToggle }: Props) {
   return (
     <aside className="right-panel">
       <div className="right-panel-body">
@@ -24,6 +26,16 @@ export function RightPanel({ activeSession }: Props) {
         </CollapsibleSection>
         <CollapsibleSection title="Pull Request">
           <SessionPrPanel session={activeSession} />
+        </CollapsibleSection>
+        <CollapsibleSection title="Settings" defaultOpen={false}>
+          <label className="settings-toggle-row">
+            <input
+              type="checkbox"
+              checked={secretFilterEnabled}
+              onChange={(e) => onSecretFilterToggle(e.target.checked)}
+            />
+            <span>Scan clipboard for secrets before paste</span>
+          </label>
         </CollapsibleSection>
       </div>
     </aside>

@@ -37,6 +37,10 @@ export type XtermBehavior = {
   // Suffix used in [termhub:terminal] log lines. 'terminal' for primary,
   // 'bottom-terminal' for the docked shell.
   logTag: string
+  // Optional async gate called with paste text before it reaches the PTY.
+  // Return true to allow paste, false to drop. When absent, xterm's native
+  // paste listener handles Ctrl+V with no interception.
+  scanBeforePaste?: (text: string) => Promise<boolean>
 }
 
 const FONT_FAMILY =
@@ -275,6 +279,41 @@ export function useXterm({
       observer.disconnect()
       if (rafId !== null) cancelAnimationFrame(rafId)
     }
+  }, [session.id, termsRef, behavior])
+
+  // Paste intercept: capture paste events before xterm's textarea listener so
+  // we can run an async secret scan and call term.paste() ourselves only when
+  // it's safe to do so. Only wired when behavior.scanBeforePaste is provided;
+  // for terminals without it (BottomTerminal) this effect is a no-op.
+  useEffect(() => {
+    if (!behavior.scanBeforePaste) return
+    const container = containerRef.current
+    if (!container) return
+
+    const handler = async (e: Event) => {
+      const clipEvent = e as ClipboardEvent
+      // Only intercept paste events that target within our container (xterm's
+      // textarea is a child). Capture phase fires before xterm's bubble handler.
+      const entry = termsRef.current.get(session.id)
+      if (!entry) return
+
+      clipEvent.preventDefault()
+      // stopPropagation in capture phase prevents the event from reaching
+      // xterm's textarea paste listener, which would fire term.paste() again.
+      clipEvent.stopPropagation()
+
+      const text = clipEvent.clipboardData?.getData('text/plain') ?? ''
+      if (!text) return
+
+      const proceed = await behavior.scanBeforePaste!(text)
+      if (proceed) {
+        entry.term.paste(text)
+      }
+    }
+
+    // capture:true fires before xterm's bubble listener on the textarea child.
+    container.addEventListener('paste', handler, { capture: true })
+    return () => container.removeEventListener('paste', handler, { capture: true })
   }, [session.id, termsRef, behavior])
 
   // Dispose only on unmount (not on every isActive flip).

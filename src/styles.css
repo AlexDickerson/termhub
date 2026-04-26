@@ -907,3 +907,62 @@ body,
   background: rgba(248, 81, 73, 0.28);
   border-color: #f85149;
 }
+
+/* ---------- Paste secret filter dialog ---------- */
+
+.paste-secret-dialog {
+  min-width: 340px;
+  max-width: 480px;
+}
+
+.paste-secret-findings {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.paste-secret-finding {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.paste-secret-rule {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.paste-secret-snippet {
+  font-family: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  font-size: 12px;
+  color: #f0c040;
+  background: rgba(240, 192, 64, 0.08);
+  border: 1px solid rgba(240, 192, 64, 0.2);
+  border-radius: 3px;
+  padding: 2px 6px;
+  word-break: break-all;
+}
+
+/* ---------- Settings panel ---------- */
+
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.settings-toggle-row input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}

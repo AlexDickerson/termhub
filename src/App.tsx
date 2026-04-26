@@ -22,6 +22,20 @@ export default function App() {
   const shellTermsRef = useRef(new Map<string, TerminalEntry>())
   const shellPendingDataRef = useRef(new Map<string, string[]>())
 
+  // Paste secret filter setting — loaded from config on mount.
+  // Defaults to true (enabled) so first render is safe before config arrives.
+  const [secretFilterEnabled, setSecretFilterEnabled] = useState(true)
+  useEffect(() => {
+    window.termhub.getConfig().then((cfg) => {
+      setSecretFilterEnabled(cfg.paste.secretFilterEnabled)
+    }).catch(() => {})
+  }, [])
+
+  const handleSecretFilterToggle = useCallback((enabled: boolean) => {
+    setSecretFilterEnabled(enabled)
+    window.termhub.setPasteSecretFilter(enabled).catch(() => {})
+  }, [])
+
   const {
     sessions,
     statuses,
@@ -160,6 +174,7 @@ export default function App() {
                     isActive={s.id === activeId}
                     termsRef={termsRef}
                     pendingDataRef={pendingDataRef}
+                    secretFilterEnabled={secretFilterEnabled}
                   />
                 ))}
               </div>
@@ -178,7 +193,11 @@ export default function App() {
             </>
           )}
         </main>
-        <RightPanel activeSession={activeSession} />
+        <RightPanel
+          activeSession={activeSession}
+          secretFilterEnabled={secretFilterEnabled}
+          onSecretFilterToggle={handleSecretFilterToggle}
+        />
       </div>
       {showUsage && <UsageModal onClose={() => setShowUsage(false)} />}
       {pendingCloseSession !== null && (

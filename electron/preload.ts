@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AgentDef,
   Config,
+  SecretFinding,
   SessionPr,
   SessionStatus,
   SkillDef,
@@ -59,6 +60,12 @@ const api = {
   writeClipboard: (text: string): void => {
     ipcRenderer.send('clipboard:write', text)
   },
+
+  scanClipboardForSecrets: (text: string): Promise<SecretFinding[]> =>
+    ipcRenderer.invoke('secrets:scan', text),
+
+  setPasteSecretFilter: (enabled: boolean): Promise<void> =>
+    ipcRenderer.invoke('config:setPasteFilter', enabled),
 
   onData: (cb: (id: string, data: string) => void): (() => void) => {
     const handler = (_e: Electron.IpcRendererEvent, p: DataPayload) => cb(p.id, p.data)
