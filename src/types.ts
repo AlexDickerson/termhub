@@ -53,6 +53,22 @@ export type SessionPr = {
   ciState: 'pending' | 'success' | 'failure' | null
 }
 
+export type SessionUsage = {
+  contextWindow: { used: number; max: number; percent: number }
+  cumulative: {
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    cacheCreateTokens: number
+  }
+  cacheHitRate: number
+  webFetches: number
+  webSearches: number
+  turns: number
+  model: string | null
+  jsonlPath: string
+}
+
 export type TermhubApi = {
   createSession: (cwd: string) => Promise<{ id: string; cwd: string }>
   sendInput: (id: string, data: string) => void
@@ -108,6 +124,10 @@ export type TermhubApi = {
   mergeSessionPr: (sessionId: string, prNumber: number) => Promise<void>
   onSessionPrChanged: (
     cb: (sessionId: string, pr: SessionPr | null) => void,
+  ) => () => void
+  getSessionUsage: (sessionId: string) => Promise<SessionUsage | null>
+  onSessionUsageChanged: (
+    cb: (sessionId: string, usage: SessionUsage) => void,
   ) => () => void
 }
 

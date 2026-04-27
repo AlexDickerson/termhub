@@ -4,6 +4,7 @@ import type {
   Config,
   SessionPr,
   SessionStatus,
+  SessionUsage,
   SkillDef,
 } from '../src/types'
 
@@ -11,6 +12,7 @@ type DataPayload = { id: string; data: string }
 type ExitPayload = { id: string; exitCode: number }
 type StatusPayload = { id: string; status: SessionStatus }
 type PrPayload = { id: string; pr: SessionPr | null }
+type UsagePayload = { id: string; usage: SessionUsage }
 type AddedPayload = {
   id: string
   cwd: string
@@ -178,6 +180,20 @@ const api = {
     ipcRenderer.on('session:pr', handler)
     return () => {
       ipcRenderer.off('session:pr', handler)
+    }
+  },
+
+  getSessionUsage: (sessionId: string): Promise<SessionUsage | null> =>
+    ipcRenderer.invoke('session:usage:get', { id: sessionId }),
+
+  onSessionUsageChanged: (
+    cb: (sessionId: string, usage: SessionUsage) => void,
+  ): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, p: UsagePayload) =>
+      cb(p.id, p.usage)
+    ipcRenderer.on('session:usage', handler)
+    return () => {
+      ipcRenderer.off('session:usage', handler)
     }
   },
 }

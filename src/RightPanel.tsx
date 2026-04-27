@@ -3,6 +3,7 @@ import { AgentList } from './AgentList'
 import { SkillList } from './SkillList'
 import { McpList } from './McpList'
 import { SessionPrPanel } from './SessionPrPanel'
+import { SessionUsagePanel } from './SessionUsagePanel'
 import type { Session } from './types'
 
 type Props = {
@@ -24,6 +25,9 @@ export function RightPanel({ activeSession }: Props) {
         </CollapsibleSection>
         <CollapsibleSection title="Pull Request">
           <SessionPrPanel session={activeSession} />
+        </CollapsibleSection>
+        <CollapsibleSection title="Token Usage">
+          <SessionUsagePanel session={activeSession} />
         </CollapsibleSection>
       </div>
     </aside>
