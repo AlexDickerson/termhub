@@ -9,6 +9,8 @@ import {
   parseGhPrListOutput,
   parseGhPrState,
   parseGhCiState,
+  parseGhPrViewOutput,
+  resolveMergeOutcome,
 } from '../electron/pr-fetch'
 
 // ---------------------------------------------------------------------------
@@ -218,5 +220,82 @@ describe('isMergeEnabled', () => {
 
   it('returns false when PR is closed', () => {
     expect(isMergeEnabled({ ...base, state: 'closed', ciState: 'success' })).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// parseGhPrViewOutput
+// ---------------------------------------------------------------------------
+
+describe('parseGhPrViewOutput', () => {
+  it('parses a merged PR response', () => {
+    const raw = JSON.stringify({ state: 'MERGED', mergedAt: '2024-01-01T00:00:00Z' })
+    expect(parseGhPrViewOutput(raw)).toEqual({ state: 'MERGED', mergedAt: '2024-01-01T00:00:00Z' })
+  })
+
+  it('parses an open PR with null mergedAt', () => {
+    const raw = JSON.stringify({ state: 'OPEN', mergedAt: null })
+    expect(parseGhPrViewOutput(raw)).toEqual({ state: 'OPEN', mergedAt: null })
+  })
+
+  it('returns null for invalid JSON', () => {
+    expect(parseGhPrViewOutput('not json')).toBe(null)
+    expect(parseGhPrViewOutput('')).toBe(null)
+  })
+
+  it('returns null when state field is missing', () => {
+    expect(parseGhPrViewOutput(JSON.stringify({ mergedAt: '2024-01-01T00:00:00Z' }))).toBe(null)
+  })
+
+  it('returns null for non-object values', () => {
+    expect(parseGhPrViewOutput('null')).toBe(null)
+    expect(parseGhPrViewOutput('"MERGED"')).toBe(null)
+    expect(parseGhPrViewOutput('[]')).toBe(null)
+  })
+
+  it('treats absent mergedAt as null', () => {
+    const raw = JSON.stringify({ state: 'OPEN' })
+    expect(parseGhPrViewOutput(raw)).toEqual({ state: 'OPEN', mergedAt: null })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// resolveMergeOutcome
+// ---------------------------------------------------------------------------
+
+describe('resolveMergeOutcome', () => {
+  it('exit 0 → success regardless of view result', () => {
+    expect(resolveMergeOutcome(0, null)).toBe(true)
+    expect(resolveMergeOutcome(0, { state: 'OPEN', mergedAt: null })).toBe(true)
+    expect(resolveMergeOutcome(0, { state: 'MERGED', mergedAt: '2024-01-01T00:00:00Z' })).toBe(true)
+  })
+
+  it('exit non-zero, view state MERGED → success (local-sync failed, API worked)', () => {
+    expect(
+      resolveMergeOutcome(1, { state: 'MERGED', mergedAt: '2024-01-01T00:00:00Z' }),
+    ).toBe(true)
+  })
+
+  it('exit non-zero, non-null mergedAt → success even if state is unexpected', () => {
+    expect(
+      resolveMergeOutcome(1, { state: 'OPEN', mergedAt: '2024-01-01T00:00:00Z' }),
+    ).toBe(true)
+  })
+
+  it('exit non-zero, view state OPEN → failure (real merge error)', () => {
+    expect(resolveMergeOutcome(1, { state: 'OPEN', mergedAt: null })).toBe(false)
+  })
+
+  it('exit non-zero, view itself failed (null) → failure', () => {
+    expect(resolveMergeOutcome(1, null)).toBe(false)
+  })
+
+  it('exit non-zero, view state CLOSED without mergedAt → failure', () => {
+    expect(resolveMergeOutcome(1, { state: 'CLOSED', mergedAt: null })).toBe(false)
+  })
+
+  it('resolveMergeOutcome is case-insensitive for state', () => {
+    expect(resolveMergeOutcome(1, { state: 'merged', mergedAt: null })).toBe(true)
+    expect(resolveMergeOutcome(1, { state: 'Merged', mergedAt: null })).toBe(true)
   })
 })
