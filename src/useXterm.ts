@@ -86,10 +86,16 @@ export function useXterm({
       const raf = requestAnimationFrame(() => {
         try {
           existing.fit.fit()
+          // Chromium resets scrollTop to 0 when the parent goes display:none,
+          // which updates xterm's _lastScrollTop but not buffer.ydisp (xterm
+          // guards against that). fit() only calls resize() when dims change;
+          // when they're the same it skips resize() entirely, so
+          // syncScrollArea() never runs and scrollTop stays 0 while ydisp
+          // stays at ybase. The result: scrollbar at top, content at bottom,
+          // any scroll interaction desyncs further. Calling syncScrollArea with
+          // immediate=true detects the mismatch and corrects scrollTop in place.
+          ;(existing.term as any)._core?.viewport?.syncScrollArea?.(true)
           if (behavior.focusOnReactivate) {
-            // Scroll to bottom after fit so the scrollbar extent is current
-            // before we jump — otherwise xterm may not be able to reach the
-            // last line.
             existing.term.scrollToBottom()
             existing.term.focus()
           }
