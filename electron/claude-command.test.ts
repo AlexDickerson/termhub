@@ -62,10 +62,12 @@ describe('buildClaudeArgs', () => {
     expect(flags.join(' ')).not.toContain('--resume')
   })
 
-  it('includes --resume for a resume call', () => {
+  it('includes both --session-id and --resume for a resume call', () => {
     const flags = buildClaudeArgs({ ...BUILD_ARGS_BASE, resume: true })
     expect(flags.some((f) => f.includes('--resume'))).toBe(true)
-    expect(flags.join(' ')).not.toContain('--session-id')
+    // --session-id must also be present so the status watcher can discover
+    // the Claude Code session file via its sessionId field.
+    expect(flags.some((f) => f.includes('--session-id'))).toBe(true)
   })
 
   it('includes --permission-mode with provided value', () => {

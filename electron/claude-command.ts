@@ -33,6 +33,10 @@ export function buildClaudeArgs(opts: {
   const flags: string[] = [`--mcp-config "${opts.mcpConfigPath}"`]
 
   if (opts.resume) {
+    // --session-id is required even on resume so Claude Code writes the
+    // termhub session id into ~/.claude/sessions/<pid>.json, letting the
+    // status watcher discover the file via findSessionFileBySessionId.
+    flags.push(`--session-id "${opts.sessionId}"`)
     flags.push(`--resume "${opts.sessionId}"`)
     if (opts.model && opts.model.length > 0) {
       flags.push(`--model "${opts.model}"`)
