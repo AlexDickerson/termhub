@@ -728,6 +728,94 @@ body,
   justify-content: flex-end;
 }
 
+/* ---------- Usage panel ---------- */
+
+.usage-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.usage-ctx-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.usage-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.usage-ctx-nums {
+  font-size: 11px;
+  color: var(--text);
+  text-align: right;
+}
+
+.usage-bar-track {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 2px;
+}
+
+.usage-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease, background 0.3s ease;
+}
+
+.usage-warn {
+  margin: 0;
+  font-size: 10px;
+  color: #f85149;
+  text-align: right;
+}
+
+.usage-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.usage-stat-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.usage-stat-val {
+  font-size: 11px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-meta-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.usage-meta {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.usage-footer {
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+  cursor: default;
+}
+
 /* ---------- Main pane ---------- */
 
 .main {
