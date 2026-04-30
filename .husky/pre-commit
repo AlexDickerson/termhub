@@ -1,0 +1,7 @@
+staged_env=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^\.env(\..+)?$' | grep -vE '^\.env\.example$' || true)
+if [ -n "$staged_env" ]; then
+  echo "ERROR: refusing to commit .env files: $staged_env" >&2
+  exit 1
+fi
+
+npx lint-staged

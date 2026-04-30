@@ -16,7 +16,8 @@
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.electron.json",
     "dist:win": "npm run build && electron-builder --win --publish never",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepare": "husky"
   },
   "build": {
     "appId": "com.alexdickerson.termhub",
@@ -69,6 +70,11 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@secretlint/secretlint-rule-anthropic": "^12.3.0",
+    "@secretlint/secretlint-rule-aws": "^12.3.0",
+    "@secretlint/secretlint-rule-github": "^12.3.0",
+    "@secretlint/secretlint-rule-openai": "^12.3.0",
+    "@secretlint/secretlint-rule-pattern": "^12.3.0",
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
@@ -78,9 +84,15 @@
     "electron": "^39.8.5",
     "electron-builder": "^25.1.8",
     "esbuild": "^0.25.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "secretlint": "^12.3.0",
     "typescript": "^5.6.3",
     "vite": "^6.4.2",
     "vitest": "^2.1.9",
     "wait-on": "^8.0.1"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,json,md,html,css}": "secretlint"
   }
 }
