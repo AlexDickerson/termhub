@@ -5,6 +5,7 @@ import type {
   SessionPr,
   SessionStatus,
   SessionUsage,
+  ShellInfo,
   SkillDef,
 } from '../src/types'
 
@@ -46,6 +47,21 @@ const api = {
 
   resizeShell: (id: string, cols: number, rows: number): void => {
     ipcRenderer.send('session:shell:resize', { id, cols, rows })
+  },
+
+  listShells: (): Promise<{ shells: ShellInfo[]; activeShellId: string }> =>
+    ipcRenderer.invoke('bottom-terminal:list-shells'),
+
+  setBottomShell: (shellId: string): Promise<void> =>
+    ipcRenderer.invoke('bottom-terminal:set-shell', shellId),
+
+  onShellRespawn: (cb: (sessionId: string) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, p: { id: string }) =>
+      cb(p.id)
+    ipcRenderer.on('session:shell:respawn', handler)
+    return () => {
+      ipcRenderer.off('session:shell:respawn', handler)
+    }
   },
 
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('dialog:pickFolder'),

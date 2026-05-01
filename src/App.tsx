@@ -3,10 +3,11 @@ import { TitleBar } from './TitleBar'
 import { Sidebar } from './Sidebar'
 import { TerminalView } from './TerminalView'
 import { BottomTerminal } from './BottomTerminal'
+import { ShellPicker } from './ShellPicker'
 import { RightPanel } from './RightPanel'
 import { UsageModal } from './UsageModal'
 import { ConfirmCloseModal } from './ConfirmCloseModal'
-import type { Session } from './types'
+import type { Session, ShellInfo } from './types'
 import type { TerminalEntry } from './useXterm'
 import { useSessions } from './useSessions'
 import { useSplitLayout } from './useSplitLayout'
@@ -39,6 +40,47 @@ export default function App() {
 
   const { bottomHeight, mainContainerRef, handleDividerMouseDown } =
     useSplitLayout()
+
+  const [shells, setShells] = useState<ShellInfo[]>([])
+  const [activeShellId, setActiveShellId] = useState<string | null>(null)
+  // Incremented per-session when the bottom shell respawns, forcing
+  // BottomTerminal to remount and reinitialise its xterm instance.
+  const [shellVersions, setShellVersions] = useState<Record<string, number>>({})
+
+  useEffect(() => {
+    window.termhub
+      .listShells()
+      .then(({ shells: detected, activeShellId: id }) => {
+        setShells(detected)
+        setActiveShellId(id)
+      })
+      .catch((err: unknown) => {
+        console.error('[termhub] listShells failed:', err)
+      })
+  }, [])
+
+  // When main respawns the bottom-shell PTY, dispose the old xterm so
+  // BottomTerminal can reinitialise cleanly on remount.
+  useEffect(() => {
+    return window.termhub.onShellRespawn((id) => {
+      const entry = shellTermsRef.current.get(id)
+      if (entry) {
+        entry.term.dispose()
+        shellTermsRef.current.delete(id)
+      }
+      shellPendingDataRef.current.delete(id)
+      setShellVersions((prev) => ({ ...prev, [id]: (prev[id] ?? 0) + 1 }))
+    })
+  }, [])
+
+  const handleSetShell = useCallback(async (shellId: string) => {
+    setActiveShellId(shellId)
+    try {
+      await window.termhub.setBottomShell(shellId)
+    } catch (err) {
+      console.error('[termhub] setBottomShell failed:', err)
+    }
+  }, [])
 
   const [showUsage, setShowUsage] = useState(false)
   // Session id pending close confirmation, or null when no dialog is open.
@@ -165,15 +207,24 @@ export default function App() {
               </div>
               <div className="main-divider" onMouseDown={handleDividerMouseDown} />
               <div className="main-bottom" style={{ flexBasis: bottomHeight }}>
-                {sessions.map((s) => (
-                  <BottomTerminal
-                    key={s.id}
-                    session={s}
-                    isActive={s.id === activeId}
-                    termsRef={shellTermsRef}
-                    pendingDataRef={shellPendingDataRef}
+                <div className="bottom-panel-header">
+                  <ShellPicker
+                    shells={shells}
+                    activeShellId={activeShellId}
+                    onSelect={handleSetShell}
                   />
-                ))}
+                </div>
+                <div className="bottom-terminal-body">
+                  {sessions.map((s) => (
+                    <BottomTerminal
+                      key={`${s.id}-${shellVersions[s.id] ?? 0}`}
+                      session={s}
+                      isActive={s.id === activeId}
+                      termsRef={shellTermsRef}
+                      pendingDataRef={shellPendingDataRef}
+                    />
+                  ))}
+                </div>
               </div>
             </>
           )}

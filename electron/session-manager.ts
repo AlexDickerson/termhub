@@ -54,6 +54,25 @@ export type FindSessionResult =
 
 const sessions = new Map<string, Session>()
 
+// Configured bottom-shell. Updated at startup from saved config and on picker change.
+// null means use OS default (process.env.COMSPEC on Windows, process.env.SHELL on Unix).
+let configuredBottomShell: { command: string; args: string[] } | null = null
+
+export function setBottomShell(shell: { command: string; args: string[] }): void {
+  configuredBottomShell = shell
+}
+
+function getBottomShell(): { command: string; args: string[] } {
+  if (configuredBottomShell) return configuredBottomShell
+  return { command: process.env.COMSPEC ?? 'cmd.exe', args: [] }
+}
+
+// Session ids whose current shell PTY was killed for a respawn. When the
+// killed PTY's onExit fires we skip the IPC event so the renderer's
+// onShellExit handler doesn't dispose the xterm that was just created for
+// the new shell.
+const pendingRespawnExits = new Set<string>()
+
 // Tracks which session ids have had at least one 'session:status' event
 // sent to the renderer. Without this, sessions whose first observed
 // status equals the initial 'working' default would never emit (the
@@ -173,13 +192,15 @@ export function createSessionInternal(opts: {
 }): { id: string; cwd: string; promptSettled: Promise<void> } {
   const id = opts.id ?? randomUUID()
   const cli = opts.cli ?? 'claude'
-  const shell = process.env.COMSPEC || 'cmd.exe'
+  // Primary PTY always uses the OS default shell — it runs claude/codex/gemini.
+  const primaryShell = process.env.COMSPEC || 'cmd.exe'
+  const { command: shellCmd, args: shellArgs } = getBottomShell()
   console.log(
-    `[termhub:session] spawning ${shell} in ${opts.cwd} (id=${id.slice(0, 8)}, cli=${cli}, source=${opts.source})`,
+    `[termhub:session] spawning ${primaryShell} in ${opts.cwd} (id=${id.slice(0, 8)}, cli=${cli}, source=${opts.source})`,
   )
   let term: pty.IPty
   try {
-    term = pty.spawn(shell, [], {
+    term = pty.spawn(primaryShell, [], {
       name: 'xterm-color',
       cols: 80,
       rows: 24,
@@ -192,12 +213,12 @@ export function createSessionInternal(opts: {
   }
   console.log(`[termhub] pty.spawn returned (pid=${term.pid})`)
 
-  // Secondary shell PTY — same executable + cwd as the primary, but holds a
-  // plain interactive prompt for the user's own work. We mirror the primary's
-  // shell choice so the bottom pane matches what the user sees by default.
+  // Secondary shell PTY — user's configured shell rooted at cwd, for manual
+  // work in the bottom pane. Separate from the primary so shell choice doesn't
+  // affect claude/codex/gemini execution.
   let shellTerm: pty.IPty
   try {
-    shellTerm = pty.spawn(shell, [], {
+    shellTerm = pty.spawn(shellCmd, shellArgs, {
       name: 'xterm-color',
       cols: 80,
       rows: 10,
@@ -349,10 +370,10 @@ export function createSessionInternal(opts: {
     // it set when it decides whether to keep the row visible.
     setStatus(session, exitCode === 0 ? 'idle' : 'failed')
     mainWindow?.webContents.send('session:exit', { id, exitCode })
-    // The session is going away — tear down the shell PTY too so we don't
-    // leak it.
+    // The session is going away — tear down the current shell PTY (which
+    // may have been respawned since creation) so we don't leak it.
     try {
-      shellTerm.kill()
+      session.shellTerm.kill()
     } catch {
       // already dead
     }
@@ -371,6 +392,10 @@ export function createSessionInternal(opts: {
   })
 
   shellTerm.onExit(({ exitCode }) => {
+    // Skip if this exit was triggered by respawnSessionShell — the renderer
+    // already received 'session:shell:respawn' and the new xterm must not be
+    // disposed by the stale exit event from the killed old shell.
+    if (pendingRespawnExits.delete(id)) return
     console.log(
       `[termhub] session ${id.slice(0, 8)} shell exited (code=${exitCode})`,
     )
@@ -437,6 +462,79 @@ export function createSessionInternal(opts: {
   }
 
   return { id, cwd: opts.cwd, promptSettled }
+}
+
+// Kills the current bottom-shell PTY for a session and spawns a new one
+// with the given shell. Sends 'session:shell:respawn' to the renderer
+// BEFORE spawning so the renderer can reset its xterm instance while
+// there is no active PTY to race against.
+export function respawnSessionShell(
+  id: string,
+  shell: { command: string; args: string[] },
+): void {
+  const session = sessions.get(id)
+  if (!session) return
+
+  // Mark this exit as a respawn kill so the old PTY's onExit handler
+  // skips the IPC event — the new xterm must not be torn down by it.
+  pendingRespawnExits.add(id)
+
+  // Signal the renderer to reset its xterm before new data arrives.
+  mainWindow?.webContents.send('session:shell:respawn', { id })
+
+  try {
+    session.shellTerm.kill()
+  } catch {
+    // already dead
+  }
+
+  let newShellTerm: pty.IPty
+  try {
+    newShellTerm = pty.spawn(shell.command, shell.args, {
+      name: 'xterm-color',
+      cols: 80,
+      rows: 10,
+      cwd: session.cwd,
+      env: cleanEnv(),
+    })
+  } catch (err) {
+    console.error(
+      `[termhub:shells] session ${id.slice(0, 8)} shell respawn failed:`,
+      err,
+    )
+    pendingRespawnExits.delete(id)
+    throw err
+  }
+
+  console.log(
+    `[termhub:shells] session ${id.slice(0, 8)} shell respawned as ${shell.command} (pid=${newShellTerm.pid})`,
+  )
+  session.shellTerm = newShellTerm
+
+  newShellTerm.onData((data) => {
+    mainWindow?.webContents.send('session:shell:data', { id, data })
+  })
+
+  newShellTerm.onExit(({ exitCode }) => {
+    if (pendingRespawnExits.delete(id)) return
+    console.log(
+      `[termhub] session ${id.slice(0, 8)} shell exited (code=${exitCode})`,
+    )
+    mainWindow?.webContents.send('session:shell:exit', { id, exitCode })
+  })
+}
+
+export function respawnAllShells(shell: { command: string; args: string[] }): void {
+  for (const session of sessions.values()) {
+    try {
+      respawnSessionShell(session.id, shell)
+    } catch (err) {
+      console.error(
+        `[termhub:shells] failed to respawn shell for session ${session.id.slice(0, 8)}:`,
+        err,
+      )
+    }
+  }
 }
 
 export function killAllSessions(): void {

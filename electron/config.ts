@@ -40,6 +40,16 @@ export function getSessionsPath(): string {
   return path.join(app.getPath('userData'), 'sessions.json')
 }
 
+export function saveConfig(config: Config): void {
+  const configPath = getConfigPath()
+  try {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2))
+  } catch (err) {
+    console.error('[termhub] failed to save config:', err)
+  }
+}
+
 // Reads ~/AppData/.../termhub/config.json; on first run, writes
 // DEFAULT_CONFIG so the user has something to edit. Errors fall back to
 // the in-memory DEFAULT_CONFIG without surfacing.

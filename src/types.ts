@@ -8,6 +8,13 @@ export type Session = {
   cli?: 'claude' | 'codex' | 'gemini'
 }
 
+export type ShellInfo = {
+  id: string
+  label: string
+  command: string
+  args: string[]
+}
+
 // Advisory, UI-only session status sourced from Claude Code's own JSONL file.
 // 'working'  — Claude is actively generating / running tools (JSONL: 'busy')
 // 'awaiting' — Claude has paused to ask the user something (JSONL: 'waiting')
@@ -43,6 +50,9 @@ export type StartupSession = {
 export type Config = {
   mcpPort: number
   startupSessions: StartupSession[]
+  bottomTerminal?: {
+    shellId?: string
+  }
 }
 
 export type SessionPr = {
@@ -79,6 +89,9 @@ export type TermhubApi = {
   // interactive shell rooted in the session's cwd.
   sendShellInput: (id: string, data: string) => void
   resizeShell: (id: string, cols: number, rows: number) => void
+  listShells: () => Promise<{ shells: ShellInfo[]; activeShellId: string }>
+  setBottomShell: (shellId: string) => Promise<void>
+  onShellRespawn: (cb: (sessionId: string) => void) => () => void
   pickFolder: () => Promise<string | null>
   home: () => Promise<string>
   getConfig: () => Promise<Config>

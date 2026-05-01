@@ -34,6 +34,10 @@ import {
   registerUsageHandlers,
   setMainWindowForUsage,
 } from './ipc-usage'
+import {
+  initBottomShell,
+  registerShellPickerHandlers,
+} from './ipc-shell-picker'
 
 // Isolate dev builds so their sessions, config, and MCP port don't bleed
 // into the production instance running alongside. Must run before the
@@ -193,6 +197,7 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(null)
 
   const config = loadConfig()
+  initBottomShell()
   writeMcpConfigFile(config.mcpPort)
 
   // Serialize MCP open_session calls. The orchestrator can fan out N
@@ -309,6 +314,7 @@ app.whenReady().then(async () => {
   registerAppHandlers({ config })
   registerPrHandlers()
   registerUsageHandlers()
+  registerShellPickerHandlers()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
