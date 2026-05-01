@@ -67,6 +67,12 @@ function getBottomShell(): { command: string; args: string[] } {
   return { command: process.env.COMSPEC ?? 'cmd.exe', args: [] }
 }
 
+// Session ids whose current shell PTY was killed for a respawn. When the
+// killed PTY's onExit fires we skip the IPC event so the renderer's
+// onShellExit handler doesn't dispose the xterm that was just created for
+// the new shell.
+const pendingRespawnExits = new Set<string>()
+
 // Tracks which session ids have had at least one 'session:status' event
 // sent to the renderer. Without this, sessions whose first observed
 // status equals the initial 'working' default would never emit (the
@@ -386,6 +392,10 @@ export function createSessionInternal(opts: {
   })
 
   shellTerm.onExit(({ exitCode }) => {
+    // Skip if this exit was triggered by respawnSessionShell — the renderer
+    // already received 'session:shell:respawn' and the new xterm must not be
+    // disposed by the stale exit event from the killed old shell.
+    if (pendingRespawnExits.delete(id)) return
     console.log(
       `[termhub] session ${id.slice(0, 8)} shell exited (code=${exitCode})`,
     )
@@ -465,7 +475,11 @@ export function respawnSessionShell(
   const session = sessions.get(id)
   if (!session) return
 
-  // Signal the renderer first so it resets xterm before new data arrives.
+  // Mark this exit as a respawn kill so the old PTY's onExit handler
+  // skips the IPC event — the new xterm must not be torn down by it.
+  pendingRespawnExits.add(id)
+
+  // Signal the renderer to reset its xterm before new data arrives.
   mainWindow?.webContents.send('session:shell:respawn', { id })
 
   try {
@@ -488,6 +502,7 @@ export function respawnSessionShell(
       `[termhub:shells] session ${id.slice(0, 8)} shell respawn failed:`,
       err,
     )
+    pendingRespawnExits.delete(id)
     throw err
   }
 
@@ -501,6 +516,7 @@ export function respawnSessionShell(
   })
 
   newShellTerm.onExit(({ exitCode }) => {
+    if (pendingRespawnExits.delete(id)) return
     console.log(
       `[termhub] session ${id.slice(0, 8)} shell exited (code=${exitCode})`,
     )
