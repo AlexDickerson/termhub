@@ -23,13 +23,14 @@ export function getModelContextMax(model: string | null): number | null {
 
 /**
  * Encode a cwd path into the sanitized directory name Claude Code uses under
- * ~/.claude/projects/. Replaces \, /, and : each with -.
+ * ~/.claude/projects/. Replaces \, /, :, and . each with -.
  *
  * E.g. "E:\Apps\termhub" → "E--Apps-termhub"
+ *      "E:\Apps\termhub\.claude\worktrees\x" → "E--Apps-termhub--claude-worktrees-x"
  *      "/home/user/repo" → "-home-user-repo"
  */
 export function encodeCwdForPath(cwd: string): string {
-  return cwd.replace(/[\\/:]/g, '-')
+  return cwd.replace(/[\\/:.]/g, '-')
 }
 
 /**
