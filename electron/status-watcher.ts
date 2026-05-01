@@ -38,9 +38,10 @@ const SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions')
 // Find the ~/.claude/sessions/<pid>.json file whose `sessionId` field matches
 // the given session ID. Returns the full path or null if not found.
 //
-// termhub passes --session-id <id> to every claude invocation, so the session
-// file written by Claude Code will always have sessionId === termhub's own id.
-// This makes the lookup exact and race-free.
+// For new sessions termhub passes --session-id <id> so Claude Code writes that
+// exact UUID. For resumed sessions the UUID is already established and Claude
+// Code writes the same UUID it resumed. Either way the lookup is exact and
+// race-free.
 export function findSessionFileBySessionId(sessionId: string): string | null {
   let files: string[]
   try {
@@ -68,9 +69,8 @@ export type WatcherHandle = {
 
 // Watch the status of a Claude Code session by looking up its runtime file at
 // ~/.claude/sessions/<pid>.json. The file is discovered by matching its
-// `sessionId` field against the termhub session id, which termhub passes as
-// --session-id to every claude invocation — making this lookup exact and
-// race-free with no cwd scanning or time-window heuristics.
+// `sessionId` field against the termhub session id — exact and race-free
+// with no cwd scanning or time-window heuristics.
 //
 // The file is a single JSON object rewritten in-place on every status change,
 // so each poll reads the whole file.
