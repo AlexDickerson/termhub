@@ -62,12 +62,14 @@ describe('buildClaudeArgs', () => {
     expect(flags.join(' ')).not.toContain('--resume')
   })
 
-  it('includes both --session-id and --resume for a resume call', () => {
+  it('resume: includes --resume but not --session-id', () => {
     const flags = buildClaudeArgs({ ...BUILD_ARGS_BASE, resume: true })
     expect(flags.some((f) => f.includes('--resume'))).toBe(true)
-    // --session-id must also be present so the status watcher can discover
-    // the Claude Code session file via its sessionId field.
-    expect(flags.some((f) => f.includes('--session-id'))).toBe(true)
+    // --session-id must NOT be present on resume: Claude Code rejects the
+    // combination of --session-id + --resume without --fork-session. The
+    // resumed session's UUID is already established; Claude Code writes it
+    // into the sessions file so the status watcher can still find it.
+    expect(flags.some((f) => f.includes('--session-id'))).toBe(false)
   })
 
   it('includes --permission-mode with provided value', () => {
