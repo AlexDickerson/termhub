@@ -33,6 +33,16 @@ describe('encodeCwdForPath', () => {
   it('handles a root drive path', () => {
     expect(encodeCwdForPath('D:\\')).toBe('D--')
   })
+
+  it('encodes dots in path segments (hidden directories like .claude)', () => {
+    expect(
+      encodeCwdForPath('E:\\Apps\\termhub\\.claude\\worktrees\\my-feature'),
+    ).toBe('E--Apps-termhub--claude-worktrees-my-feature')
+  })
+
+  it('encodes dots in POSIX hidden directories', () => {
+    expect(encodeCwdForPath('/home/user/.config')).toBe('-home-user--config')
+  })
 })
 
 describe('resolveJsonlPath', () => {
