@@ -7,21 +7,44 @@ type Props = {
   onSelect: (shellId: string) => void
 }
 
-export function ShellPicker({ shells, activeShellId, onSelect }: Props) {
-  const [open, setOpen] = useState(false)
-  const wrapperRef = useRef<HTMLDivElement>(null)
+type MenuPos = { top: number; right: number }
 
+export function ShellPicker({ shells, activeShellId, onSelect }: Props) {
+  const [menuPos, setMenuPos] = useState<MenuPos | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  const open = menuPos !== null
   const activeShell = shells.find((s) => s.id === activeShellId)
+
+  const handleToggle = () => {
+    if (open) {
+      setMenuPos(null)
+      return
+    }
+    const rect = btnRef.current?.getBoundingClientRect()
+    if (rect) {
+      // Open above the button, right-aligned to the button's right edge.
+      setMenuPos({
+        top: rect.top - 4,
+        right: window.innerWidth - rect.right,
+      })
+    }
+  }
 
   useEffect(() => {
     if (!open) return
     const onMouseDown = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false)
+      const target = e.target as Node
+      if (
+        !btnRef.current?.contains(target) &&
+        !menuRef.current?.contains(target)
+      ) {
+        setMenuPos(null)
       }
     }
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key === 'Escape') setMenuPos(null)
     }
     document.addEventListener('mousedown', onMouseDown)
     document.addEventListener('keydown', onKeyDown)
@@ -34,24 +57,34 @@ export function ShellPicker({ shells, activeShellId, onSelect }: Props) {
   if (shells.length === 0) return null
 
   return (
-    <div className="shell-picker" ref={wrapperRef}>
+    <>
       <button
+        ref={btnRef}
         className="shell-picker-btn"
-        onClick={() => setOpen((v) => !v)}
+        onClick={handleToggle}
         title="Change shell"
       >
         {activeShell?.label ?? activeShellId ?? 'Shell'}
         <span className="shell-picker-chevron">▾</span>
       </button>
-      {open && (
-        <div className="shell-picker-menu">
+      {open && menuPos && (
+        <div
+          ref={menuRef}
+          className="shell-picker-menu"
+          style={{
+            position: 'fixed',
+            top: menuPos.top,
+            right: menuPos.right,
+            transform: 'translateY(-100%)',
+          }}
+        >
           {shells.map((shell) => (
             <button
               key={shell.id}
               className="context-menu-item shell-picker-option"
               onClick={() => {
                 onSelect(shell.id)
-                setOpen(false)
+                setMenuPos(null)
               }}
             >
               <span className="shell-picker-check">
@@ -62,6 +95,6 @@ export function ShellPicker({ shells, activeShellId, onSelect }: Props) {
           ))}
         </div>
       )}
-    </div>
+    </>
   )
 }
