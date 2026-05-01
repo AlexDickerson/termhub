@@ -852,10 +852,90 @@ body,
 /* Bottom shell pane — height is controlled dynamically via inline style (flex-basis). */
 .main-bottom {
   flex: 0 0 auto;
-  position: relative;
   overflow: hidden;
   min-height: 0;
   border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.bottom-panel-header {
+  flex-shrink: 0;
+  height: 28px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 8px;
+}
+
+.bottom-terminal-body {
+  flex: 1 1 auto;
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ---------- Shell picker ---------- */
+
+.shell-picker {
+  position: relative;
+}
+
+.shell-picker-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: inherit;
+  font-size: 11px;
+  height: 20px;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+.shell-picker-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.shell-picker-chevron {
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+.shell-picker-menu {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  bottom: calc(100% + 4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(149, 128, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 4px;
+  position: absolute;
+  right: 0;
+  z-index: 200;
+}
+
+.shell-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shell-picker-check {
+  color: var(--accent);
+  font-size: 11px;
+  min-width: 12px;
+  text-align: center;
 }
 
 .terminal-pane {
