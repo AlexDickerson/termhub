@@ -32,16 +32,14 @@ export function RightPanel({ activeSession, style, isCollapsed, onToggleCollapse
 
   return (
     <aside className="right-panel" style={style}>
-      <div className="panel-collapse-row">
-        <button
-          className="panel-toggle-btn panel-toggle-btn--collapse"
-          onClick={onToggleCollapse}
-          title="Collapse panel"
-          aria-label="Collapse panel"
-        >
-          ›
-        </button>
-      </div>
+      <button
+        className="panel-toggle-btn panel-toggle-btn--collapse"
+        onClick={onToggleCollapse}
+        title="Collapse panel"
+        aria-label="Collapse panel"
+      >
+        ›
+      </button>
       <div className="right-panel-body">
         <CollapsibleSection title="Agents">
           <AgentList />

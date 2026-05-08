@@ -160,6 +160,7 @@ body,
 
 .sidebar {
   flex-shrink: 0;
+  position: relative;
   background: var(--bg-sidebar);
   display: flex;
   flex-direction: column;
@@ -170,13 +171,6 @@ body,
   align-items: center;
   justify-content: flex-start;
   padding-top: 6px;
-}
-
-.sidebar-collapse-row {
-  flex-shrink: 0;
-  display: flex;
-  justify-content: flex-end;
-  padding: 4px 6px 0;
 }
 
 .sidebar-toggle-btn {
@@ -194,6 +188,14 @@ body,
 .sidebar-toggle-btn:hover {
   color: var(--text);
   background: var(--hover);
+}
+
+/* Collapse button floats in the top-right corner, over the content */
+.sidebar-toggle-btn--collapse {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
 }
 
 .sidebar-header {
@@ -441,6 +443,7 @@ body,
 
 .right-panel {
   flex-shrink: 0;
+  position: relative;
   background: var(--bg-sidebar);
   display: flex;
   flex-direction: column;
@@ -451,13 +454,6 @@ body,
   align-items: center;
   justify-content: flex-start;
   padding-top: 6px;
-}
-
-.panel-collapse-row {
-  flex-shrink: 0;
-  display: flex;
-  justify-content: flex-start;
-  padding: 4px 6px 0;
 }
 
 .panel-toggle-btn {
@@ -475,6 +471,14 @@ body,
 .panel-toggle-btn:hover {
   color: var(--text);
   background: var(--hover);
+}
+
+/* Collapse button floats in the top-left corner, over the content */
+.panel-toggle-btn--collapse {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 1;
 }
 
 .right-panel-header {

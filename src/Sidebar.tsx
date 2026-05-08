@@ -130,16 +130,14 @@ export function Sidebar({
 
   return (
     <aside className="sidebar" style={style}>
-      <div className="sidebar-collapse-row">
-        <button
-          className="sidebar-toggle-btn sidebar-toggle-btn--collapse"
-          onClick={onToggleCollapse}
-          title="Collapse sidebar"
-          aria-label="Collapse sidebar"
-        >
-          ‹
-        </button>
-      </div>
+      <button
+        className="sidebar-toggle-btn sidebar-toggle-btn--collapse"
+        onClick={onToggleCollapse}
+        title="Collapse sidebar"
+        aria-label="Collapse sidebar"
+      >
+        ‹
+      </button>
       <div className="groups">
         {[...groups.entries()].map(([groupKey, list]) => {
           const first = list[0]
