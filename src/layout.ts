@@ -9,8 +9,11 @@ export const SIDEBAR_MIN_WIDTH = 160
 export const SIDEBAR_MAX_FRACTION = 0.4
 export const LEFT_SIDEBAR_DEFAULT_WIDTH = 240
 export const RIGHT_PANEL_DEFAULT_WIDTH = 240
+export const SIDEBAR_COLLAPSED_WIDTH = 28
 export const LEFT_SIDEBAR_STORAGE_KEY = 'termhub:leftSidebarWidth'
 export const RIGHT_PANEL_STORAGE_KEY = 'termhub:rightPanelWidth'
+export const LEFT_SIDEBAR_COLLAPSED_KEY = 'termhub:leftSidebarCollapsed'
+export const RIGHT_PANEL_COLLAPSED_KEY = 'termhub:rightPanelCollapsed'
 
 // Clamp a dimension (height or width) to [min, available * maxFraction].
 // max is never less than min so minimum always wins in degenerate situations.
@@ -56,5 +59,14 @@ export function readPersistedWidth(key: string, defaultWidth: number): number {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultWidth
   } catch {
     return defaultWidth
+  }
+}
+
+/** Read a persisted sidebar collapsed state from localStorage. Defaults to false. */
+export function readPersistedCollapsed(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === 'true'
+  } catch {
+    return false
   }
 }

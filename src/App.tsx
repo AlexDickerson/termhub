@@ -18,6 +18,10 @@ import {
   LEFT_SIDEBAR_DEFAULT_WIDTH,
   RIGHT_PANEL_STORAGE_KEY,
   RIGHT_PANEL_DEFAULT_WIDTH,
+  SIDEBAR_COLLAPSED_WIDTH,
+  LEFT_SIDEBAR_COLLAPSED_KEY,
+  RIGHT_PANEL_COLLAPSED_KEY,
+  readPersistedCollapsed,
 } from './layout'
 
 export default function App() {
@@ -55,6 +59,29 @@ export default function App() {
 
   const { width: rightWidth, handleDividerMouseDown: handleRightDividerMouseDown } =
     useSidebarResize('right', RIGHT_PANEL_STORAGE_KEY, RIGHT_PANEL_DEFAULT_WIDTH, appBodyRef)
+
+  const [leftCollapsed, setLeftCollapsed] = useState<boolean>(() =>
+    readPersistedCollapsed(LEFT_SIDEBAR_COLLAPSED_KEY),
+  )
+  const [rightCollapsed, setRightCollapsed] = useState<boolean>(() =>
+    readPersistedCollapsed(RIGHT_PANEL_COLLAPSED_KEY),
+  )
+
+  const handleToggleLeft = useCallback(() => {
+    setLeftCollapsed((prev) => {
+      const next = !prev
+      try { localStorage.setItem(LEFT_SIDEBAR_COLLAPSED_KEY, String(next)) } catch {}
+      return next
+    })
+  }, [])
+
+  const handleToggleRight = useCallback(() => {
+    setRightCollapsed((prev) => {
+      const next = !prev
+      try { localStorage.setItem(RIGHT_PANEL_COLLAPSED_KEY, String(next)) } catch {}
+      return next
+    })
+  }, [])
 
   const [shells, setShells] = useState<ShellInfo[]>([])
   const [activeShellId, setActiveShellId] = useState<string | null>(null)
@@ -162,7 +189,7 @@ export default function App() {
     if (entry) {
       try { entry.fit.fit() } catch {}
     }
-  }, [leftWidth, rightWidth, activeId])
+  }, [leftWidth, rightWidth, leftCollapsed, rightCollapsed, activeId])
 
   // Refit both when active session changes (their containers just became
   // visible).
@@ -209,9 +236,13 @@ export default function App() {
           onSelect={setActiveId}
           onClose={requestClose}
           onRename={renameSession}
-          style={{ width: leftWidth }}
+          style={{ width: leftCollapsed ? SIDEBAR_COLLAPSED_WIDTH : leftWidth }}
+          isCollapsed={leftCollapsed}
+          onToggleCollapse={handleToggleLeft}
         />
-        <div className="sidebar-divider" onMouseDown={handleLeftDividerMouseDown} />
+        {!leftCollapsed && (
+          <div className="sidebar-divider" onMouseDown={handleLeftDividerMouseDown} />
+        )}
         <main className="main" ref={mainContainerRef}>
           {sessions.length === 0 ? (
             <div className="empty">
@@ -255,8 +286,15 @@ export default function App() {
             </>
           )}
         </main>
-        <div className="sidebar-divider" onMouseDown={handleRightDividerMouseDown} />
-        <RightPanel activeSession={activeSession} style={{ width: rightWidth }} />
+        {!rightCollapsed && (
+          <div className="sidebar-divider" onMouseDown={handleRightDividerMouseDown} />
+        )}
+        <RightPanel
+          activeSession={activeSession}
+          style={{ width: rightCollapsed ? SIDEBAR_COLLAPSED_WIDTH : rightWidth }}
+          isCollapsed={rightCollapsed}
+          onToggleCollapse={handleToggleRight}
+        />
       </div>
       {showUsage && <UsageModal onClose={() => setShowUsage(false)} />}
       {pendingCloseSession !== null && (

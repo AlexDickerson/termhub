@@ -10,11 +10,38 @@ import type { Session } from './types'
 type Props = {
   activeSession: Session | null
   style?: CSSProperties
+  isCollapsed?: boolean
+  onToggleCollapse?: () => void
 }
 
-export function RightPanel({ activeSession, style }: Props) {
+export function RightPanel({ activeSession, style, isCollapsed, onToggleCollapse }: Props) {
+  if (isCollapsed) {
+    return (
+      <aside className="right-panel right-panel--collapsed" style={style}>
+        <button
+          className="panel-toggle-btn"
+          onClick={onToggleCollapse}
+          title="Expand panel"
+          aria-label="Expand panel"
+        >
+          ‹
+        </button>
+      </aside>
+    )
+  }
+
   return (
     <aside className="right-panel" style={style}>
+      <div className="panel-collapse-row">
+        <button
+          className="panel-toggle-btn panel-toggle-btn--collapse"
+          onClick={onToggleCollapse}
+          title="Collapse panel"
+          aria-label="Collapse panel"
+        >
+          ›
+        </button>
+      </div>
       <div className="right-panel-body">
         <CollapsibleSection title="Agents">
           <AgentList />

@@ -17,6 +17,8 @@ type Props = {
   onClose: (id: string) => void
   onRename: (id: string, name: string) => Promise<void>
   style?: CSSProperties
+  isCollapsed?: boolean
+  onToggleCollapse?: () => void
 }
 
 const STATUS_LABEL: Record<SessionStatus, string> = {
@@ -35,6 +37,8 @@ export function Sidebar({
   onClose,
   onRename,
   style,
+  isCollapsed,
+  onToggleCollapse,
 }: Props) {
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -109,8 +113,33 @@ export function Sidebar({
   }, [contextSession])
 
 
+  if (isCollapsed) {
+    return (
+      <aside className="sidebar sidebar--collapsed" style={style}>
+        <button
+          className="sidebar-toggle-btn"
+          onClick={onToggleCollapse}
+          title="Expand sidebar"
+          aria-label="Expand sidebar"
+        >
+          ›
+        </button>
+      </aside>
+    )
+  }
+
   return (
     <aside className="sidebar" style={style}>
+      <div className="sidebar-collapse-row">
+        <button
+          className="sidebar-toggle-btn sidebar-toggle-btn--collapse"
+          onClick={onToggleCollapse}
+          title="Collapse sidebar"
+          aria-label="Collapse sidebar"
+        >
+          ‹
+        </button>
+      </div>
       <div className="groups">
         {[...groups.entries()].map(([groupKey, list]) => {
           const first = list[0]
