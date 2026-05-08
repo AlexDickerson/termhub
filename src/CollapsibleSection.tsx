@@ -17,7 +17,6 @@ export function CollapsibleSection({ title, defaultOpen = true, action, children
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
         >
-          <span className="section-chevron">{open ? '▾' : '▸'}</span>
           <span className="section-title">{title}</span>
         </button>
         {action ? <div className="section-action">{action}</div> : null}

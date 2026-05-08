@@ -549,13 +549,6 @@ body,
   background: var(--hover);
 }
 
-.section-chevron {
-  display: inline-block;
-  width: 10px;
-  color: var(--text-dim);
-  font-size: 10px;
-}
-
 .section-action {
   padding-right: 8px;
 }
