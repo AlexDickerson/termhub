@@ -133,11 +133,21 @@ export function useXterm({
         theme: { ...TERMINAL_THEME },
         scrollback: 5000,
         allowProposedApi: true,
+        // OSC 8 hyperlinks (e.g. Claude Code's PR links) bypass WebLinksAddon
+        // and use this handler instead. Without it, xterm falls back to
+        // window.open('about:blank') which Electron intercepts as a popup.
+        linkHandler: {
+          activate(event, uri) {
+            event.preventDefault()
+            window.termhub.openExternal(uri)
+          },
+        },
       })
       const fit = new FitAddon()
       term.loadAddon(fit)
 
-      const linksAddon = new WebLinksAddon((_event, uri) => {
+      const linksAddon = new WebLinksAddon((event, uri) => {
+        event.preventDefault()
         window.termhub.openExternal(uri)
       })
       term.loadAddon(linksAddon)
