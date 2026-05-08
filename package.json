@@ -75,9 +75,6 @@
     },
     "dmg": {
       "artifactName": "${productName}-${version}-${arch}.${ext}"
-    },
-    "zip": {
-      "artifactName": "${productName}-${version}-${arch}-mac.${ext}"
     }
   },
   "dependencies": {
