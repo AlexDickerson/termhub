@@ -6,11 +6,12 @@
 // The mainWindow ref needed by dialog and window controls is injected
 // at startup via setMainWindow so this module doesn't import main.ts.
 
-import { ipcMain, dialog, clipboard, shell, BrowserWindow } from 'electron'
+import { ipcMain, dialog, clipboard, BrowserWindow } from 'electron'
 import * as os from 'node:os'
 import { spawn } from 'node:child_process'
 import type { Config } from '../src/types'
 import { isAllowedExternalUrl } from './links'
+import { openExternalUrl } from './opener'
 import { getConfigPath } from './config'
 
 let mainWindow: BrowserWindow | null = null
@@ -59,7 +60,7 @@ export function registerAppHandlers(opts: { config: Config }): void {
 
   ipcMain.on('open-external', (_event, url: string) => {
     if (isAllowedExternalUrl(url)) {
-      shell.openExternal(url)
+      openExternalUrl(url)
     } else {
       try {
         console.warn(
