@@ -62,9 +62,19 @@ export function setBottomShell(shell: { command: string; args: string[] }): void
   configuredBottomShell = shell
 }
 
+// Resolves the OS default interactive shell command. Pure: parameters
+// override real platform / env so this is unit-testable.
+export function defaultPrimaryShell(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (platform === 'win32') return env.COMSPEC ?? 'cmd.exe'
+  return env.SHELL ?? '/bin/sh'
+}
+
 function getBottomShell(): { command: string; args: string[] } {
   if (configuredBottomShell) return configuredBottomShell
-  return { command: process.env.COMSPEC ?? 'cmd.exe', args: [] }
+  return { command: defaultPrimaryShell(), args: [] }
 }
 
 // Session ids whose current shell PTY was killed for a respawn. When the
@@ -193,7 +203,7 @@ export function createSessionInternal(opts: {
   const id = opts.id ?? randomUUID()
   const cli = opts.cli ?? 'claude'
   // Primary PTY always uses the OS default shell — it runs claude/codex/gemini.
-  const primaryShell = process.env.COMSPEC || 'cmd.exe'
+  const primaryShell = defaultPrimaryShell()
   const { command: shellCmd, args: shellArgs } = getBottomShell()
   console.log(
     `[termhub:session] spawning ${primaryShell} in ${opts.cwd} (id=${id.slice(0, 8)}, cli=${cli}, source=${opts.source})`,
