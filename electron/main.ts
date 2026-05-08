@@ -39,6 +39,8 @@ import {
   initBottomShell,
   registerShellPickerHandlers,
 } from './ipc-shell-picker'
+import { openExternalUrl } from './opener'
+import { isAllowedExternalUrl } from './links'
 
 // Isolate dev builds so their sessions, config, and MCP port don't bleed
 // into the production instance running alongside. Must run before the
@@ -95,6 +97,33 @@ function createWindow(): void {
       sandbox: false,
       webviewTag: true,
     },
+  })
+
+  // Intercept any navigation the renderer tries to perform so external URLs
+  // go to the system browser instead of loading inside the Electron window.
+  // Covers both anchor clicks that weren't preventDefault()-ed and any
+  // window.open() calls that might slip through.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const devUrl = process.env.VITE_DEV_SERVER_URL
+    if (devUrl && url.startsWith(devUrl)) return
+    if (url.startsWith('file://')) return
+    event.preventDefault()
+    if (isAllowedExternalUrl(url)) {
+      console.info('[termhub:links] intercepted will-navigate, routing externally:', url)
+      openExternalUrl(url)
+    } else {
+      console.warn('[termhub:links] blocked will-navigate to disallowed URL:', url)
+    }
+  })
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedExternalUrl(url)) {
+      console.info('[termhub:links] intercepted window.open, routing externally:', url)
+      openExternalUrl(url)
+    } else {
+      console.warn('[termhub:links] blocked window.open to disallowed URL:', url)
+    }
+    return { action: 'deny' }
   })
 
   // Push maximize/restore state to the renderer so the title bar button
