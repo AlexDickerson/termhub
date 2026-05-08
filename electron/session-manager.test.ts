@@ -10,7 +10,7 @@ vi.mock('electron', () => ({
 }))
 vi.mock('@lydell/node-pty', () => ({ spawn: () => ({}) }))
 
-import { shouldEmitStatus } from './session-manager'
+import { defaultPrimaryShell, shouldEmitStatus } from './session-manager'
 
 // Regression: pre-fix, sessions starting at 'working' that first reported
 // 'busy' (which maps to 'working') would never emit a 'session:status'
@@ -39,5 +39,40 @@ describe('shouldEmitStatus', () => {
     const emitted = new Set<string>(['a'])
     expect(shouldEmitStatus(emitted, 'a', 'working', 'working')).toBe(false)
     expect(shouldEmitStatus(emitted, 'b', 'working', 'working')).toBe(true)
+  })
+})
+
+describe('defaultPrimaryShell', () => {
+  it('uses COMSPEC on Windows when set', () => {
+    expect(
+      defaultPrimaryShell('win32', { COMSPEC: 'C:\\Windows\\System32\\cmd.exe' }),
+    ).toBe('C:\\Windows\\System32\\cmd.exe')
+  })
+
+  it('falls back to cmd.exe on Windows when COMSPEC is unset', () => {
+    expect(defaultPrimaryShell('win32', {})).toBe('cmd.exe')
+  })
+
+  it('uses SHELL on macOS when set', () => {
+    expect(defaultPrimaryShell('darwin', { SHELL: '/bin/zsh' })).toBe('/bin/zsh')
+  })
+
+  it('uses SHELL on Linux when set', () => {
+    expect(defaultPrimaryShell('linux', { SHELL: '/usr/bin/bash' })).toBe(
+      '/usr/bin/bash',
+    )
+  })
+
+  it('falls back to /bin/sh on Unix when SHELL is unset', () => {
+    expect(defaultPrimaryShell('darwin', {})).toBe('/bin/sh')
+    expect(defaultPrimaryShell('linux', {})).toBe('/bin/sh')
+  })
+
+  it('does not pick COMSPEC on non-Windows platforms', () => {
+    // Guards against a regression where Unix paths fall through to a
+    // Windows-only env var.
+    expect(
+      defaultPrimaryShell('darwin', { COMSPEC: 'cmd.exe', SHELL: '/bin/zsh' }),
+    ).toBe('/bin/zsh')
   })
 })

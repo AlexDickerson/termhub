@@ -6,6 +6,7 @@
 import { app } from 'electron'
 import * as path from 'node:path'
 import * as fs from 'node:fs'
+import * as os from 'node:os'
 import type { Config } from '../src/types'
 
 export const DEFAULT_CONFIG: Config = {
@@ -19,7 +20,7 @@ export const DEFAULT_CONFIG: Config = {
   // available on the host.
   startupSessions: [
     {
-      cwd: 'E:/',
+      cwd: os.homedir(),
       command: 'claude',
       agent: 'orchestrator',
       permissionMode: 'bypassPermissions',

@@ -12,6 +12,7 @@ import type { Config } from '../src/types'
 import { stripAnsi } from './output-buffer'
 import { writeBracketedPasteAndSubmit } from './claude-command'
 import { getMcpConfigPath, loadConfig } from './config'
+import { resolveSessionCwd } from './cwd-resolve'
 import { loadPersistedSessions } from './persistence'
 import { isClaudeModelName } from './codex-command'
 import {
@@ -142,10 +143,16 @@ function bootstrapSessions(config: Config): void {
   const occupiedCwds = new Set<string>()
 
   for (const s of persisted) {
+    const cwd = resolveSessionCwd(s.cwd)
+    if (cwd !== s.cwd) {
+      console.warn(
+        `[termhub] resumed session ${s.id.slice(0, 8)} cwd ${s.cwd} not found on this host — falling back to ${cwd}`,
+      )
+    }
     try {
       createSessionInternal({
         id: s.id,
-        cwd: s.cwd,
+        cwd,
         command: s.command,
         name: s.name,
         model: s.model,
@@ -155,7 +162,7 @@ function bootstrapSessions(config: Config): void {
         cli: s.cli,
         source: 'resume',
       })
-      occupiedCwds.add(s.cwd)
+      occupiedCwds.add(cwd)
     } catch (err) {
       console.error(
         `[termhub] failed to resume session ${s.id.slice(0, 8)}:`,
@@ -165,15 +172,21 @@ function bootstrapSessions(config: Config): void {
   }
 
   for (const entry of config.startupSessions) {
-    if (occupiedCwds.has(entry.cwd)) {
+    const cwd = resolveSessionCwd(entry.cwd)
+    if (cwd !== entry.cwd) {
+      console.warn(
+        `[termhub] startup entry cwd ${entry.cwd} not found on this host — falling back to ${cwd}`,
+      )
+    }
+    if (occupiedCwds.has(cwd)) {
       console.log(
-        `[termhub] skipping startup entry ${entry.cwd} (resumed from persistence)`,
+        `[termhub] skipping startup entry ${cwd} (resumed from persistence)`,
       )
       continue
     }
     try {
       createSessionInternal({
-        cwd: entry.cwd,
+        cwd,
         command: entry.command,
         prompt: entry.prompt,
         agent: entry.agent,
@@ -185,9 +198,9 @@ function bootstrapSessions(config: Config): void {
         cli: entry.cli,
         source: 'startup',
       })
-      occupiedCwds.add(entry.cwd)
+      occupiedCwds.add(cwd)
     } catch (err) {
-      console.error('[termhub] startup session failed for', entry.cwd, err)
+      console.error('[termhub] startup session failed for', cwd, err)
     }
   }
 }
