@@ -11,7 +11,18 @@ import type { Session, ShellInfo } from './types'
 import type { TerminalEntry } from './useXterm'
 import { useSessions } from './useSessions'
 import { useSplitLayout } from './useSplitLayout'
+import { useSidebarResize } from './useSidebarResize'
 import { needsCloseConfirm } from './confirm-close'
+import {
+  LEFT_SIDEBAR_STORAGE_KEY,
+  LEFT_SIDEBAR_DEFAULT_WIDTH,
+  RIGHT_PANEL_STORAGE_KEY,
+  RIGHT_PANEL_DEFAULT_WIDTH,
+  SIDEBAR_COLLAPSED_WIDTH,
+  LEFT_SIDEBAR_COLLAPSED_KEY,
+  RIGHT_PANEL_COLLAPSED_KEY,
+  readPersistedCollapsed,
+} from './layout'
 
 export default function App() {
   // Primary (claude) PTY xterm instances, keyed by session id. Owned here
@@ -40,6 +51,37 @@ export default function App() {
 
   const { bottomHeight, mainContainerRef, handleDividerMouseDown } =
     useSplitLayout()
+
+  const appBodyRef = useRef<HTMLDivElement>(null)
+
+  const { width: leftWidth, handleDividerMouseDown: handleLeftDividerMouseDown } =
+    useSidebarResize('left', LEFT_SIDEBAR_STORAGE_KEY, LEFT_SIDEBAR_DEFAULT_WIDTH, appBodyRef)
+
+  const { width: rightWidth, handleDividerMouseDown: handleRightDividerMouseDown } =
+    useSidebarResize('right', RIGHT_PANEL_STORAGE_KEY, RIGHT_PANEL_DEFAULT_WIDTH, appBodyRef)
+
+  const [leftCollapsed, setLeftCollapsed] = useState<boolean>(() =>
+    readPersistedCollapsed(LEFT_SIDEBAR_COLLAPSED_KEY),
+  )
+  const [rightCollapsed, setRightCollapsed] = useState<boolean>(() =>
+    readPersistedCollapsed(RIGHT_PANEL_COLLAPSED_KEY),
+  )
+
+  const handleToggleLeft = useCallback(() => {
+    setLeftCollapsed((prev) => {
+      const next = !prev
+      try { localStorage.setItem(LEFT_SIDEBAR_COLLAPSED_KEY, String(next)) } catch {}
+      return next
+    })
+  }, [])
+
+  const handleToggleRight = useCallback(() => {
+    setRightCollapsed((prev) => {
+      const next = !prev
+      try { localStorage.setItem(RIGHT_PANEL_COLLAPSED_KEY, String(next)) } catch {}
+      return next
+    })
+  }, [])
 
   const [shells, setShells] = useState<ShellInfo[]>([])
   const [activeShellId, setActiveShellId] = useState<string | null>(null)
@@ -140,6 +182,15 @@ export default function App() {
     return () => window.removeEventListener('resize', onResize)
   }, [activeId])
 
+  // Refit the active terminal when sidebar widths change (main area resizes).
+  useEffect(() => {
+    if (!activeId) return
+    const entry = termsRef.current.get(activeId)
+    if (entry) {
+      try { entry.fit.fit() } catch {}
+    }
+  }, [leftWidth, rightWidth, leftCollapsed, rightCollapsed, activeId])
+
   // Refit both when active session changes (their containers just became
   // visible).
   useEffect(() => {
@@ -176,7 +227,7 @@ export default function App() {
   return (
     <div className="app">
       <TitleBar onOpenUsage={() => setShowUsage(true)} />
-      <div className="app-body">
+      <div className="app-body" ref={appBodyRef}>
         <Sidebar
           groups={grouped}
           activeId={activeId}
@@ -185,7 +236,13 @@ export default function App() {
           onSelect={setActiveId}
           onClose={requestClose}
           onRename={renameSession}
+          style={{ width: leftCollapsed ? SIDEBAR_COLLAPSED_WIDTH : leftWidth }}
+          isCollapsed={leftCollapsed}
+          onToggleCollapse={handleToggleLeft}
         />
+        {!leftCollapsed && (
+          <div className="sidebar-divider" onMouseDown={handleLeftDividerMouseDown} />
+        )}
         <main className="main" ref={mainContainerRef}>
           {sessions.length === 0 ? (
             <div className="empty">
@@ -229,7 +286,15 @@ export default function App() {
             </>
           )}
         </main>
-        <RightPanel activeSession={activeSession} />
+        {!rightCollapsed && (
+          <div className="sidebar-divider" onMouseDown={handleRightDividerMouseDown} />
+        )}
+        <RightPanel
+          activeSession={activeSession}
+          style={{ width: rightCollapsed ? SIDEBAR_COLLAPSED_WIDTH : rightWidth }}
+          isCollapsed={rightCollapsed}
+          onToggleCollapse={handleToggleRight}
+        />
       </div>
       {showUsage && <UsageModal onClose={() => setShowUsage(false)} />}
       {pendingCloseSession !== null && (

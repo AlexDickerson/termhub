@@ -142,16 +142,60 @@ body,
   min-height: 0;
 }
 
+/* Vertical rule between sidebar/main and main/right-panel. Draggable to resize. */
+.sidebar-divider {
+  flex: 0 0 auto;
+  width: 4px;
+  background: var(--border);
+  cursor: col-resize;
+  transition: background 0.15s;
+}
+
+.sidebar-divider:hover,
+.sidebar-divider:active {
+  background: var(--accent);
+}
+
 /* ---------- Sidebar ---------- */
 
 .sidebar {
-  width: 240px;
   flex-shrink: 0;
+  position: relative;
   background: var(--bg-sidebar);
-  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.sidebar--collapsed {
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 6px;
+}
+
+.sidebar-toggle-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 5px;
+  border-radius: 4px;
+  transition: color 0.12s, background 0.12s;
+}
+
+.sidebar-toggle-btn:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+/* Collapse button floats in the top-right corner, over the content */
+.sidebar-toggle-btn--collapse {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
 }
 
 .sidebar-header {
@@ -398,13 +442,43 @@ body,
 /* ---------- Right panel ---------- */
 
 .right-panel {
-  width: 240px;
   flex-shrink: 0;
+  position: relative;
   background: var(--bg-sidebar);
-  border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.right-panel--collapsed {
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 6px;
+}
+
+.panel-toggle-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 5px;
+  border-radius: 4px;
+  transition: color 0.12s, background 0.12s;
+}
+
+.panel-toggle-btn:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+/* Collapse button floats in the top-left corner, over the content */
+.panel-toggle-btn--collapse {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 1;
 }
 
 .right-panel-header {
@@ -468,18 +542,12 @@ body,
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  text-align: left;
+  text-align: right;
+  justify-content: flex-end;
 }
 
 .section-toggle:hover {
   background: var(--hover);
-}
-
-.section-chevron {
-  display: inline-block;
-  width: 10px;
-  color: var(--text-dim);
-  font-size: 10px;
 }
 
 .section-action {

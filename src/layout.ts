@@ -5,26 +5,31 @@ export const BOTTOM_MAX_FRACTION = 0.7
 export const BOTTOM_DEFAULT_HEIGHT = 220
 export const BOTTOM_HEIGHT_STORAGE_KEY = 'termhub:bottomTerminalHeight'
 
-/**
- * Clamp a raw bottom-terminal height to valid bounds.
- *
- * @param raw           Unclamped height in pixels (e.g. from a drag computation).
- * @param min           Minimum allowed height in pixels.
- * @param maxFraction   Maximum fraction of the available container height.
- * @param available     Total available content-area height in pixels.
- * @returns             Clamped height in pixels.
- */
-export function clampHeight(
+export const SIDEBAR_MIN_WIDTH = 160
+export const SIDEBAR_MAX_FRACTION = 0.4
+export const LEFT_SIDEBAR_DEFAULT_WIDTH = 240
+export const RIGHT_PANEL_DEFAULT_WIDTH = 240
+export const SIDEBAR_COLLAPSED_WIDTH = 28
+export const LEFT_SIDEBAR_STORAGE_KEY = 'termhub:leftSidebarWidth'
+export const RIGHT_PANEL_STORAGE_KEY = 'termhub:rightPanelWidth'
+export const LEFT_SIDEBAR_COLLAPSED_KEY = 'termhub:leftSidebarCollapsed'
+export const RIGHT_PANEL_COLLAPSED_KEY = 'termhub:rightPanelCollapsed'
+
+// Clamp a dimension (height or width) to [min, available * maxFraction].
+// max is never less than min so minimum always wins in degenerate situations.
+export function clampDimension(
   raw: number,
   min: number,
   maxFraction: number,
   available: number,
 ): number {
-  // Ensure max is never less than min so the minimum always wins in
-  // degenerate situations (e.g. a zero-height container).
   const max = Math.max(min, Math.floor(available * maxFraction))
   return Math.min(Math.max(Math.round(raw), min), max)
 }
+
+// Backwards-compat aliases — useSplitLayout and tests import clampHeight.
+export const clampHeight = clampDimension
+export const clampWidth = clampDimension
 
 /**
  * Read the persisted bottom-terminal height from localStorage.
@@ -39,5 +44,29 @@ export function readPersistedHeight(defaultHeight: number): number {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultHeight
   } catch {
     return defaultHeight
+  }
+}
+
+/**
+ * Read a persisted sidebar width from localStorage.
+ * Falls back to `defaultWidth` when absent or invalid.
+ */
+export function readPersistedWidth(key: string, defaultWidth: number): number {
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw === null) return defaultWidth
+    const parsed = Number(raw)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultWidth
+  } catch {
+    return defaultWidth
+  }
+}
+
+/** Read a persisted sidebar collapsed state from localStorage. Defaults to false. */
+export function readPersistedCollapsed(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === 'true'
+  } catch {
+    return false
   }
 }
