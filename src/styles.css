@@ -142,13 +142,25 @@ body,
   min-height: 0;
 }
 
+/* Vertical rule between sidebar/main and main/right-panel. Draggable to resize. */
+.sidebar-divider {
+  flex: 0 0 auto;
+  width: 4px;
+  background: var(--border);
+  cursor: col-resize;
+  transition: background 0.15s;
+}
+
+.sidebar-divider:hover,
+.sidebar-divider:active {
+  background: var(--accent);
+}
+
 /* ---------- Sidebar ---------- */
 
 .sidebar {
-  width: 240px;
   flex-shrink: 0;
   background: var(--bg-sidebar);
-  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -398,10 +410,8 @@ body,
 /* ---------- Right panel ---------- */
 
 .right-panel {
-  width: 240px;
   flex-shrink: 0;
   background: var(--bg-sidebar);
-  border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;

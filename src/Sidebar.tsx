@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import type { Session, SessionStatus } from './types'
 
 type ContextMenu = {
@@ -15,6 +16,7 @@ type Props = {
   onSelect: (id: string) => void
   onClose: (id: string) => void
   onRename: (id: string, name: string) => Promise<void>
+  style?: CSSProperties
 }
 
 const STATUS_LABEL: Record<SessionStatus, string> = {
@@ -32,6 +34,7 @@ export function Sidebar({
   onSelect,
   onClose,
   onRename,
+  style,
 }: Props) {
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -107,7 +110,7 @@ export function Sidebar({
 
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" style={style}>
       <div className="groups">
         {[...groups.entries()].map(([groupKey, list]) => {
           const first = list[0]

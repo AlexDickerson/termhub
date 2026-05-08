@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import { CollapsibleSection } from './CollapsibleSection'
 import { AgentList } from './AgentList'
 import { SkillList } from './SkillList'
@@ -8,11 +9,12 @@ import type { Session } from './types'
 
 type Props = {
   activeSession: Session | null
+  style?: CSSProperties
 }
 
-export function RightPanel({ activeSession }: Props) {
+export function RightPanel({ activeSession, style }: Props) {
   return (
-    <aside className="right-panel">
+    <aside className="right-panel" style={style}>
       <div className="right-panel-body">
         <CollapsibleSection title="Agents">
           <AgentList />
