@@ -47,7 +47,12 @@ async function fetchAndCachePr(sessionId: string): Promise<void> {
   try {
     branch = await getGitBranch(session.cwd)
   } catch (err) {
-    console.warn(`[termhub:pr] session ${sessionId.slice(0, 8)}: cannot determine branch:`, err instanceof Error ? err.message : String(err))
+    const msg = err instanceof Error ? err.message : String(err)
+    // "not a git repository" is expected for sessions rooted outside a
+    // repo (e.g. an orchestrator session at ~/Repos) — skip the warn so
+    // the poll loop doesn't spam the log every interval.
+    if (/not a git repository/i.test(msg)) return
+    console.warn(`[termhub:pr] session ${sessionId.slice(0, 8)}: cannot determine branch:`, msg)
     return
   }
 

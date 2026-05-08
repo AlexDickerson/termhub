@@ -12,5 +12,6 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["electron", "src/types.ts"]
+  "include": ["electron", "src/types.ts"],
+  "exclude": ["node_modules", "dist", ".claude"]
 }

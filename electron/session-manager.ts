@@ -160,6 +160,19 @@ export function findSessionByIdOrPrefix(idOrPrefix: string): FindSessionResult {
   }
 }
 
+// Test-only — seeds the live sessions map without spawning a PTY.
+// Avoids the cost of building a full createSessionInternal mock just to
+// exercise shutdown / persistence ordering. Not part of the runtime API.
+export function __addSessionForTest(session: Session): void {
+  sessions.set(session.id, session)
+}
+
+// Test-only — drains the sessions map between cases.
+export function __resetSessionsForTest(): void {
+  sessions.clear()
+  statusEmitted.clear()
+}
+
 // Snapshot the live sessions Map into the persistence wire format and
 // hand off to writePersistedSessions. Called whenever session state
 // changes (create / close / rename / exit).
@@ -387,10 +400,15 @@ export function createSessionInternal(opts: {
     } catch {
       // already dead
     }
-    sessions.delete(id)
+    // If the session was already removed from the map (e.g. by
+    // killAllSessions during shutdown), skip persistSessions — otherwise
+    // the snapshot of the now-empty map would clobber the metadata that
+    // killAllSessions just wrote. wasPresent distinguishes a normal exit
+    // from a shutdown-triggered exit.
+    const wasPresent = sessions.delete(id)
     statusEmitted.delete(id)
     for (const cb of sessionClosedCallbacks) cb(id)
-    persistSessions()
+    if (wasPresent) persistSessions()
   })
 
   // Shell PTY data/exit live on a parallel IPC channel. We deliberately do
@@ -547,7 +565,15 @@ export function respawnAllShells(shell: { command: string; args: string[] }): vo
   }
 }
 
+// Tear down every live session at app shutdown. Persists the metadata
+// snapshot BEFORE killing/clearing so sessions.json reflects the live
+// list and can be restored on next launch — without this, on macOS the
+// app stays alive after window-all-closed and reopens to an empty list.
+// The persist is skipped when the map is already empty (e.g. a second
+// call from before-quit after window-all-closed has already drained it),
+// so we don't overwrite a good snapshot with an empty one.
 export function killAllSessions(): void {
+  if (sessions.size > 0) persistSessions()
   for (const s of sessions.values()) {
     try {
       s.term.kill()

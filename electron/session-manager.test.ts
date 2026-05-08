@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // session-manager imports electron + @lydell/node-pty + node:crypto at the
 // top level. None of those are loadable in Vitest's node env without
@@ -10,7 +10,22 @@ vi.mock('electron', () => ({
 }))
 vi.mock('@lydell/node-pty', () => ({ spawn: () => ({}) }))
 
-import { defaultPrimaryShell, shouldEmitStatus } from './session-manager'
+// Capture persistence writes so the killAllSessions ordering test can
+// assert on what got written (and how many times).
+const writePersistedSessionsMock = vi.fn()
+vi.mock('./persistence', () => ({
+  loadPersistedSessions: () => [],
+  writePersistedSessions: (list: unknown[]) => writePersistedSessionsMock(list),
+}))
+
+import {
+  __addSessionForTest,
+  __resetSessionsForTest,
+  defaultPrimaryShell,
+  killAllSessions,
+  shouldEmitStatus,
+  type Session,
+} from './session-manager'
 
 // Regression: pre-fix, sessions starting at 'working' that first reported
 // 'busy' (which maps to 'working') would never emit a 'session:status'
@@ -74,5 +89,55 @@ describe('defaultPrimaryShell', () => {
     expect(
       defaultPrimaryShell('darwin', { COMSPEC: 'cmd.exe', SHELL: '/bin/zsh' }),
     ).toBe('/bin/zsh')
+  })
+})
+
+// Regression: on macOS, closing the window fires window-all-closed →
+// killAllSessions, but the app stays alive. Pre-fix, killAllSessions
+// killed PTYs and cleared the map without persisting first. The async
+// term.onExit callbacks then fired and called persistSessions() against
+// the now-empty map, clobbering sessions.json. On next launch, nothing
+// was restored.
+describe('killAllSessions persistence', () => {
+  function fakeSession(id: string, cwd: string): Session {
+    const noopPty = { kill: () => {} }
+    return {
+      id,
+      cwd,
+      term: noopPty,
+      shellTerm: noopPty,
+      outputBuffer: '',
+      status: 'working',
+      jsonlWatcher: null,
+    } as unknown as Session
+  }
+
+  beforeEach(() => {
+    writePersistedSessionsMock.mockClear()
+    __resetSessionsForTest()
+  })
+
+  it('persists session metadata before clearing the live map', () => {
+    __addSessionForTest(fakeSession('id-1', '/tmp/a'))
+    __addSessionForTest(fakeSession('id-2', '/tmp/b'))
+
+    killAllSessions()
+
+    expect(writePersistedSessionsMock).toHaveBeenCalledTimes(1)
+    const list = writePersistedSessionsMock.mock.calls[0][0] as Array<{ id: string }>
+    expect(list.map((s) => s.id).sort()).toEqual(['id-1', 'id-2'])
+  })
+
+  it('does not overwrite the snapshot with an empty list on a redundant second call', () => {
+    // On non-macOS, window-all-closed → killAllSessions → app.quit() →
+    // before-quit → killAllSessions. The second invocation must not
+    // clobber the good snapshot from the first with an empty list.
+    __addSessionForTest(fakeSession('id-1', '/tmp/a'))
+
+    killAllSessions()
+    expect(writePersistedSessionsMock).toHaveBeenCalledTimes(1)
+
+    killAllSessions()
+    expect(writePersistedSessionsMock).toHaveBeenCalledTimes(1)
   })
 })
