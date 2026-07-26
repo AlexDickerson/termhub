@@ -13,6 +13,7 @@ import { stripAnsi } from './output-buffer'
 import { writeBracketedPasteAndSubmit } from './claude-command'
 import { getMcpConfigPath, getMcpTokenPath, loadConfig } from './config'
 import { MCP_TOKEN_HEADER, getOrCreateToken } from './mcp-auth'
+import { applyLoginShellPath } from './shell-path'
 import { resolveSessionCwd } from './cwd-resolve'
 import { loadPersistedSessions } from './persistence'
 import { isClaudeModelName } from './codex-command'
@@ -235,6 +236,11 @@ function bootstrapSessions(config: Config): void {
 app.whenReady().then(async () => {
   // Remove the native File/Edit/… menu bar entirely.
   Menu.setApplicationMenu(null)
+
+  // Must precede any PTY spawn: cleanEnv() snapshots process.env per session,
+  // and a Finder-launched app starts with a PATH that has no Homebrew,
+  // /usr/local/bin, or version-manager shims — so `claude` is not found.
+  applyLoginShellPath()
 
   const config = loadConfig()
   initBottomShell()
