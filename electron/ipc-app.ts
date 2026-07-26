@@ -6,7 +6,7 @@
 // The mainWindow ref needed by dialog and window controls is injected
 // at startup via setMainWindow so this module doesn't import main.ts.
 
-import { ipcMain, dialog, clipboard, BrowserWindow } from 'electron'
+import { ipcMain, dialog, clipboard, shell, BrowserWindow } from 'electron'
 import * as os from 'node:os'
 import { spawn } from 'node:child_process'
 import type { Config } from '../src/types'
@@ -52,6 +52,19 @@ export function registerAppHandlers(opts: { config: Config }): void {
   ipcMain.handle('app:home', () => os.homedir())
   ipcMain.handle('config:get', () => opts.config)
   ipcMain.handle('config:path', () => getConfigPath())
+
+  // Open config.json in the OS default editor. termhub has no settings UI —
+  // mcpPort and startupSessions are edited by hand — and the path lives deep
+  // inside userData, so without this the file is effectively unreachable.
+  ipcMain.handle('config:open', async () => {
+    const configPath = getConfigPath()
+    const error = await shell.openPath(configPath)
+    if (error) {
+      console.error(`[termhub] failed to open config at ${configPath}: ${error}`)
+      throw new Error(`Could not open ${configPath}: ${error}`)
+    }
+    console.log(`[termhub] opened config ${configPath} in the default editor`)
+  })
 
   ipcMain.handle('clipboard:read', () => clipboard.readText())
   ipcMain.on('clipboard:write', (_event, text: string) => {

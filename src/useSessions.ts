@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type MutableRefObject } from 'react'
-import type { Session, SessionStatus } from './types'
+import type { NewSessionOptions, Session, SessionStatus } from './types'
 import type { TerminalEntry } from './useXterm'
 
 type SessionRefs = {
@@ -7,6 +7,9 @@ type SessionRefs = {
   pendingDataRef: MutableRefObject<Map<string, string[]>>
   shellTermsRef: MutableRefObject<Map<string, TerminalEntry>>
   shellPendingDataRef: MutableRefObject<Map<string, string[]>>
+  // Surfaces failures to the user. Injected rather than imported so this
+  // hook stays free of the toast implementation.
+  reportError: (message: string, err: unknown) => void
 }
 
 export type UseSessionsResult = {
@@ -16,7 +19,7 @@ export type UseSessionsResult = {
   setActiveId: (id: string | null | ((prev: string | null) => string | null)) => void
   closeSession: (id: string) => void
   renameSession: (id: string, name: string) => Promise<void>
-  newSession: () => Promise<void>
+  newSession: (opts: NewSessionOptions) => Promise<void>
 }
 
 // Owns the renderer-side session state and the IPC subscription wiring
@@ -28,7 +31,13 @@ export type UseSessionsResult = {
 // / onShellExit / onSessionAdded, then catches up via listSessions and
 // signals appReady so main can begin creating bootstrap sessions.
 export function useSessions(refs: SessionRefs): UseSessionsResult {
-  const { termsRef, pendingDataRef, shellTermsRef, shellPendingDataRef } = refs
+  const {
+    termsRef,
+    pendingDataRef,
+    shellTermsRef,
+    shellPendingDataRef,
+    reportError,
+  } = refs
 
   const [sessions, setSessions] = useState<Session[]>([])
   const [statuses, setStatuses] = useState<Record<string, SessionStatus>>({})
@@ -188,20 +197,26 @@ export function useSessions(refs: SessionRefs): UseSessionsResult {
     }
   }, [])
 
-  const newSession = useCallback(async () => {
-    try {
-      const cwd = await window.termhub.pickFolder()
-      if (!cwd) return
-      const s = await window.termhub.createSession(cwd)
-      setSessions((prev) => [...prev, s])
-      setActiveId(s.id)
-    } catch (err) {
-      console.error('[termhub] newSession failed:', err)
-      alert(
-        `Failed to create session:\n${err instanceof Error ? err.message : String(err)}`,
-      )
-    }
-  }, [])
+  // Options come from NewSessionModal; the folder picker now lives there
+  // rather than being the whole interaction.
+  const newSession = useCallback(
+    async (opts: NewSessionOptions) => {
+      try {
+        const created = await window.termhub.createSession(opts)
+        const session: Session = {
+          ...created,
+          name: opts.name,
+          cli: opts.cli,
+          command: opts.cli,
+        }
+        setSessions((prev) => [...prev, session])
+        setActiveId(created.id)
+      } catch (err) {
+        reportError('Failed to create session', err)
+      }
+    },
+    [reportError],
+  )
 
   return {
     sessions,

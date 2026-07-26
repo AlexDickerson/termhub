@@ -7,7 +7,10 @@ import { ShellPicker } from './ShellPicker'
 import { RightPanel } from './RightPanel'
 import { UsageModal } from './UsageModal'
 import { ConfirmCloseModal } from './ConfirmCloseModal'
-import type { Session, ShellInfo } from './types'
+import { NewSessionModal } from './NewSessionModal'
+import { Toasts } from './Toasts'
+import { useToasts } from './useToasts'
+import type { AgentDef, NewSessionOptions, Session, ShellInfo } from './types'
 import type { TerminalEntry } from './useXterm'
 import { useSessions } from './useSessions'
 import { useSplitLayout } from './useSplitLayout'
@@ -34,6 +37,8 @@ export default function App() {
   const shellTermsRef = useRef(new Map<string, TerminalEntry>())
   const shellPendingDataRef = useRef(new Map<string, string[]>())
 
+  const { toasts, dismiss, reportError } = useToasts()
+
   const {
     sessions,
     statuses,
@@ -47,6 +52,7 @@ export default function App() {
     pendingDataRef,
     shellTermsRef,
     shellPendingDataRef,
+    reportError,
   })
 
   const { bottomHeight, mainContainerRef, handleDividerMouseDown } =
@@ -97,7 +103,7 @@ export default function App() {
         setActiveShellId(id)
       })
       .catch((err: unknown) => {
-        console.error('[termhub] listShells failed:', err)
+        reportError('Could not list shells', err)
       })
   }, [])
 
@@ -120,11 +126,16 @@ export default function App() {
     try {
       await window.termhub.setBottomShell(shellId)
     } catch (err) {
-      console.error('[termhub] setBottomShell failed:', err)
+      reportError('Could not switch shell', err)
     }
-  }, [])
+  }, [reportError])
 
   const [showUsage, setShowUsage] = useState(false)
+  // New-session dialog state. `newSessionCwd` seeds the folder field with
+  // the active session's directory (or $HOME), which is nearly always where
+  // the next session wants to start.
+  const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null)
+  const [agents, setAgents] = useState<AgentDef[]>([])
   // Session id pending close confirmation, or null when no dialog is open.
   const [pendingCloseId, setPendingCloseId] = useState<string | null>(null)
 
@@ -218,6 +229,45 @@ export default function App() {
     return () => cancelAnimationFrame(raf)
   }, [activeId])
 
+  // Open the new-session dialog, seeding the folder from the active session
+  // and refreshing the agent list (agents can be added on disk at any time).
+  const openNewSession = useCallback(async () => {
+    const active = sessions.find((s) => s.id === activeId)
+    let cwd = active?.cwd
+    if (!cwd) {
+      try {
+        cwd = await window.termhub.home()
+      } catch (err) {
+        reportError('Could not resolve the home directory', err)
+        cwd = ''
+      }
+    }
+    try {
+      setAgents(await window.termhub.listAgents())
+    } catch (err) {
+      // Non-fatal: the dialog still works, the agent dropdown is just empty.
+      console.warn('[termhub] listAgents failed; agent picker will be empty', err)
+      setAgents([])
+    }
+    setNewSessionCwd(cwd ?? '')
+  }, [sessions, activeId, reportError])
+
+  const handleCreateSession = useCallback(
+    (opts: NewSessionOptions) => {
+      setNewSessionCwd(null)
+      void newSession(opts)
+    },
+    [newSession],
+  )
+
+  const handleOpenConfig = useCallback(async () => {
+    try {
+      await window.termhub.openConfigFile()
+    } catch (err) {
+      reportError('Could not open config.json', err)
+    }
+  }, [reportError])
+
   const grouped = useMemo(() => groupSessions(sessions), [sessions])
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeId) ?? null,
@@ -226,13 +276,13 @@ export default function App() {
 
   return (
     <div className="app">
-      <TitleBar onOpenUsage={() => setShowUsage(true)} />
+      <TitleBar onOpenUsage={() => setShowUsage(true)} onOpenConfig={handleOpenConfig} />
       <div className="app-body" ref={appBodyRef}>
         <Sidebar
           groups={grouped}
           activeId={activeId}
           statuses={statuses}
-          onNew={newSession}
+          onNew={openNewSession}
           onSelect={setActiveId}
           onClose={requestClose}
           onRename={renameSession}
@@ -247,7 +297,7 @@ export default function App() {
           {sessions.length === 0 ? (
             <div className="empty">
               <p>No sessions yet.</p>
-              <button onClick={newSession}>+ New Session</button>
+              <button onClick={openNewSession}>+ New Session</button>
             </div>
           ) : (
             <>
@@ -304,6 +354,15 @@ export default function App() {
           onCancel={handleCancelClose}
         />
       )}
+      {newSessionCwd !== null && (
+        <NewSessionModal
+          initialCwd={newSessionCwd}
+          agents={agents}
+          onCreate={handleCreateSession}
+          onCancel={() => setNewSessionCwd(null)}
+        />
+      )}
+      <Toasts toasts={toasts} onDismiss={dismiss} />
     </div>
   )
 }

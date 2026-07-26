@@ -47,6 +47,32 @@ export type StartupSession = {
   cli?: 'claude' | 'codex' | 'gemini'
 }
 
+// What the renderer can ask for when spawning a session. Mirrors the fields
+// the MCP `open_session` tool accepts, so the new-session dialog and the
+// orchestrator have the same reach. Omit `cli` for a plain shell.
+export type NewSessionOptions = {
+  cwd: string
+  cli?: 'claude' | 'codex' | 'gemini'
+  model?: string
+  agent?: string
+  permissionMode?: string
+  prompt?: string
+  name?: string
+  dangerouslySkipPermissions?: boolean
+  allowDangerouslySkipPermissions?: boolean
+}
+
+// Permission modes accepted by `claude --permission-mode`. Kept here so the
+// dialog and any future validation share one list.
+export const PERMISSION_MODES = [
+  'default',
+  'acceptEdits',
+  'plan',
+  'bypassPermissions',
+  'dontAsk',
+  'auto',
+] as const
+
 export type Config = {
   mcpPort: number
   startupSessions: StartupSession[]
@@ -80,7 +106,7 @@ export type SessionUsage = {
 }
 
 export type TermhubApi = {
-  createSession: (cwd: string) => Promise<{ id: string; cwd: string }>
+  createSession: (opts: NewSessionOptions) => Promise<{ id: string; cwd: string }>
   sendInput: (id: string, data: string) => void
   resize: (id: string, cols: number, rows: number) => void
   close: (id: string) => void
@@ -96,6 +122,7 @@ export type TermhubApi = {
   home: () => Promise<string>
   getConfig: () => Promise<Config>
   configPath: () => Promise<string>
+  openConfigFile: () => Promise<void>
   readClipboard: () => Promise<string>
   writeClipboard: (text: string) => void
   onData: (cb: (id: string, data: string) => void) => () => void
