@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, configDefaults } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 
@@ -29,5 +29,13 @@ export default defineConfig({
         '**/.claude/**',
       ],
     },
+  },
+  test: {
+    // Same rationale as server.watch.ignored above: orchestrator subagents
+    // leave full source copies under .claude/worktrees/<branch>/. Without
+    // this, vitest collects and runs every worktree's copy of the suite
+    // alongside the real one — duplicate work, and any test that binds a
+    // fixed port fails with EADDRINUSE against its own clone.
+    exclude: [...configDefaults.exclude, '**/.claude/**'],
   },
 })

@@ -1,11 +1,15 @@
 // Tests for electron/mcp.ts — focuses on the sanitized error-response contract
 // (CodeQL js/stack-trace-exposure: error details must not reach the caller).
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { startMcpServer, type McpHooks } from './mcp'
 import { MCP_ROUTES } from './mcp-routes'
 
-const BASE_PORT = 19_876
+// Port 0 asks the OS for a free port; startMcpServer reports the real one back
+// on the handle. Fixed ports used to collide when more than one copy of this
+// suite ran at once (e.g. a stale worktree checkout) or when a dev instance of
+// termhub was already listening.
+const EPHEMERAL = 0
 
 function makeHooks(overrides: Partial<McpHooks> = {}): McpHooks {
   return {
@@ -27,12 +31,17 @@ async function post(port: number, path: string, body: unknown): Promise<{ status
 }
 
 describe('mcp HTTP server — error sanitization', () => {
-  let port = BASE_PORT
+  let port: number
   let close: () => Promise<void>
 
-  beforeEach(async () => {
-    port += 1
-  })
+  // Each test stands up its own server via start(); these hold the most
+  // recent one so afterEach can tear it down.
+  async function start(hooks: McpHooks) {
+    const handle = await startMcpServer({ port: EPHEMERAL, hooks })
+    port = handle.port
+    close = handle.close
+    return handle
+  }
 
   afterEach(async () => {
     await close?.()
@@ -44,13 +53,9 @@ describe('mcp HTTP server — error sanitization', () => {
     const err = new Error('internal failure: file not found at /secrets/key.pem')
     err.stack = `Error: internal failure: file not found at /secrets/key.pem\n    at /home/user/app/electron/main.ts:123:7\n    at process.nextTick`
 
-    const handle = await startMcpServer({
-      port,
-      hooks: makeHooks({
-        openClaudeSession: () => { throw err },
-      }),
-    })
-    close = handle.close
+    await start(makeHooks({
+      openClaudeSession: () => { throw err },
+    }))
 
     const { status, json } = await post(port, MCP_ROUTES.OPEN_SESSION, { cwd: '/tmp' })
 
@@ -67,8 +72,7 @@ describe('mcp HTTP server — error sanitization', () => {
   })
 
   it('open_session: malformed JSON body — response contains no stack trace', async () => {
-    const handle = await startMcpServer({ port, hooks: makeHooks() })
-    close = handle.close
+    await start(makeHooks())
 
     const res = await fetch(`http://127.0.0.1:${port}${MCP_ROUTES.OPEN_SESSION}`, {
       method: 'POST',
@@ -87,8 +91,7 @@ describe('mcp HTTP server — error sanitization', () => {
   // ── send_input ────────────────────────────────────────────────────────────
 
   it('send_input: malformed JSON body — response contains no stack trace', async () => {
-    const handle = await startMcpServer({ port, hooks: makeHooks() })
-    close = handle.close
+    await start(makeHooks())
 
     const res = await fetch(`http://127.0.0.1:${port}${MCP_ROUTES.SEND_INPUT}`, {
       method: 'POST',
@@ -107,8 +110,7 @@ describe('mcp HTTP server — error sanitization', () => {
   // ── read_output ───────────────────────────────────────────────────────────
 
   it('read_output: malformed JSON body — response contains no stack trace', async () => {
-    const handle = await startMcpServer({ port, hooks: makeHooks() })
-    close = handle.close
+    await start(makeHooks())
 
     const res = await fetch(`http://127.0.0.1:${port}${MCP_ROUTES.READ_OUTPUT}`, {
       method: 'POST',
@@ -127,8 +129,7 @@ describe('mcp HTTP server — error sanitization', () => {
   // ── regression: happy paths still work ───────────────────────────────────
 
   it('open_session: valid request returns session id', async () => {
-    const handle = await startMcpServer({ port, hooks: makeHooks() })
-    close = handle.close
+    await start(makeHooks())
 
     const { status, json } = await post(port, MCP_ROUTES.OPEN_SESSION, { cwd: '/tmp' })
     expect(status).toBe(200)
