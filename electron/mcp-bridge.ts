@@ -15,6 +15,7 @@ import { z } from 'zod'
 import { MCP_ROUTES } from './mcp-routes'
 import { MCP_TOKEN_HEADER } from './mcp-auth'
 import type { SessionSummary } from './mcp'
+import pkg from '../package.json'
 
 const port = Number.parseInt(process.env.TERMHUB_PORT ?? '7787', 10)
 const baseUrl = `http://127.0.0.1:${port}`
@@ -44,7 +45,10 @@ export function formatSession(s: SessionSummary): string {
 async function main() {
   const server = new McpServer({
     name: 'termhub',
-    version: '0.1.0',
+    // Read from package.json rather than a literal — esbuild inlines it at
+    // bundle time, and a hardcoded string here silently drifted from the
+    // real version.
+    version: pkg.version,
   })
 
   server.registerTool(
