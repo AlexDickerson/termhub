@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  clampBottomHeight,
   clampHeight,
   clampDimension,
   readPersistedHeight,
@@ -51,6 +52,48 @@ describe('clampHeight', () => {
     // When available is 0 the max is also 0 which is less than min,
     // so the result should equal the minimum (Math.max wins).
     expect(clampHeight(100, BOTTOM_MIN_HEIGHT, BOTTOM_MAX_FRACTION, 0)).toBe(BOTTOM_MIN_HEIGHT)
+  })
+})
+
+// Regression: the persisted height was applied unclamped on load, so a height
+// saved in a tall window squeezed .main-top toward zero in a shorter one.
+// .main-bottom is `flex: 0 0 auto` and cannot shrink, so past the container it
+// spilled and got clipped — the claude terminal appeared cut off by the shell
+// selector. Measured in a 600px container: persisted 500 left the top pane at
+// 96px, and persisted 900 left it at 0 with 304px spilling past .main.
+describe('clampBottomHeight', () => {
+  it('leaves a height that already fits alone', () => {
+    expect(clampBottomHeight(220, 600)).toBe(220)
+  })
+
+  it('caps an oversized persisted height at the max fraction', () => {
+    // 70% of 600 — leaves 180px for the claude pane instead of 96px.
+    expect(clampBottomHeight(500, 600)).toBe(420)
+  })
+
+  it('caps a height larger than the container, which would otherwise spill', () => {
+    expect(clampBottomHeight(900, 600)).toBe(420)
+    expect(clampBottomHeight(900, 600)).toBeLessThan(600)
+  })
+
+  it('raises a too-small height to the minimum', () => {
+    expect(clampBottomHeight(5, 600)).toBe(BOTTOM_MIN_HEIGHT)
+  })
+
+  it('never returns more than the container height', () => {
+    for (const available of [100, 300, 600, 1200, 2000]) {
+      expect(clampBottomHeight(99999, available)).toBeLessThanOrEqual(available)
+    }
+  })
+
+  it('always leaves room for the claude pane', () => {
+    for (const available of [300, 600, 1200]) {
+      expect(available - clampBottomHeight(99999, available)).toBeGreaterThan(0)
+    }
+  })
+
+  it('falls back to the minimum in a degenerate zero-height container', () => {
+    expect(clampBottomHeight(400, 0)).toBe(BOTTOM_MIN_HEIGHT)
   })
 })
 

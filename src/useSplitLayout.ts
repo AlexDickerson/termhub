@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
+  clampBottomHeight,
   clampHeight,
   readPersistedHeight,
   BOTTOM_MIN_HEIGHT,
@@ -41,6 +42,49 @@ export function useSplitLayout(): UseSplitLayoutResult {
   useEffect(() => {
     bottomHeightRef.current = bottomHeight
   }, [bottomHeight])
+
+  // Re-clamp against the space actually available — on mount and on every
+  // window resize.
+  //
+  // readPersistedHeight deliberately does no clamping; it can't, because it has
+  // no idea how tall the container will be. Without this, a height persisted in
+  // a tall (or maximised) window squeezes .main-top toward zero in a shorter
+  // one — .main-bottom is `flex: 0 0 auto` and cannot shrink — and past the
+  // container it spills and is clipped by `.main { overflow: hidden }`. The
+  // visible symptom is the claude terminal being cut off by the shell selector.
+  //
+  // Layout effect, not a plain effect, so the correction lands before paint
+  // rather than flashing a broken split for a frame.
+  const clampToContainer = useCallback(() => {
+    const container = mainContainerRef.current
+    if (!container) return
+    const available = container.getBoundingClientRect().height
+    if (available <= 0) return
+    setBottomHeight((prev) => {
+      const next = clampBottomHeight(prev, available)
+      if (next === prev) return prev
+      console.info(
+        `[termhub:layout] clamped bottom pane ${prev} -> ${next} for ${Math.round(available)}px of space`,
+      )
+      bottomHeightRef.current = next
+      return next
+    })
+  }, [])
+
+  useLayoutEffect(() => {
+    clampToContainer()
+  }, [clampToContainer])
+
+  useEffect(() => {
+    // Skip while dragging: the drag handler already clamps against a live
+    // measurement, and re-entering here would fight it.
+    const onResize = () => {
+      if (isDraggingRef.current) return
+      clampToContainer()
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [clampToContainer])
 
   const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
