@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AgentDef,
   Config,
+  NewSessionOptions,
   SessionPr,
   SessionStatus,
   SessionUsage,
@@ -26,8 +27,10 @@ type AddedPayload = {
 }
 
 const api = {
-  createSession: (cwd: string): Promise<{ id: string; cwd: string }> =>
-    ipcRenderer.invoke('session:create', { cwd }),
+  createSession: (
+    opts: NewSessionOptions,
+  ): Promise<{ id: string; cwd: string }> =>
+    ipcRenderer.invoke('session:create', opts),
 
   sendInput: (id: string, data: string): void => {
     ipcRenderer.send('session:input', { id, data })
@@ -71,6 +74,7 @@ const api = {
   getConfig: (): Promise<Config> => ipcRenderer.invoke('config:get'),
 
   configPath: (): Promise<string> => ipcRenderer.invoke('config:path'),
+  openConfigFile: (): Promise<void> => ipcRenderer.invoke('config:open'),
 
   readClipboard: (): Promise<string> => ipcRenderer.invoke('clipboard:read'),
 
