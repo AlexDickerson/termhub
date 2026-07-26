@@ -193,6 +193,41 @@ export function persistSessions(): void {
 
 // Drop a session from the map. Called by the close IPC handler;
 // term.onExit handles its own cleanup so this isn't called from there.
+// Tear a session down: stop the JSONL watcher, kill both PTYs, drop it from
+// the map, and re-persist. Shared by the renderer's session:close IPC and the
+// MCP close_session tool so the two can't drift.
+//
+// Returns false when the id doesn't resolve. Killing the primary PTY also
+// fires its onExit handler, which deletes from the map and persists again —
+// harmless, and the explicit delete here keeps the teardown correct even if
+// the PTY was already dead and onExit never fires.
+export function closeSession(id: string): boolean {
+  const session = sessions.get(id)
+  if (!session) return false
+
+  console.log(
+    `[termhub:session] closing session ${id.slice(0, 8)} (cli=${session.cli ?? 'shell'}, cwd=${session.cwd})`,
+  )
+
+  if (session.jsonlWatcher) {
+    session.jsonlWatcher.stop()
+    session.jsonlWatcher = null
+  }
+  try {
+    session.term.kill()
+  } catch {
+    // already dead
+  }
+  try {
+    session.shellTerm.kill()
+  } catch {
+    // already dead
+  }
+  deleteSession(id)
+  persistSessions()
+  return true
+}
+
 export function deleteSession(id: string): void {
   sessions.delete(id)
   statusEmitted.delete(id)

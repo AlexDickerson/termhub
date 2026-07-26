@@ -5,8 +5,8 @@
 
 import { ipcMain } from 'electron'
 import {
+  closeSession,
   createSessionInternal,
-  deleteSession,
   getAllSessions,
   getSession,
   persistSessions,
@@ -39,24 +39,7 @@ export function registerSessionHandlers(): void {
   )
 
   ipcMain.on('session:close', (_event, payload: { id: string }) => {
-    const s = getSession(payload.id)
-    if (!s) return
-    if (s.jsonlWatcher) {
-      s.jsonlWatcher.stop()
-      s.jsonlWatcher = null
-    }
-    try {
-      s.term.kill()
-    } catch {
-      // already dead
-    }
-    try {
-      s.shellTerm.kill()
-    } catch {
-      // already dead
-    }
-    deleteSession(payload.id)
-    persistSessions()
+    closeSession(payload.id)
   })
 
   ipcMain.on(

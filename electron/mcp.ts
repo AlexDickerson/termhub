@@ -6,8 +6,24 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { MCP_ROUTES } from './mcp-routes'
 import { MCP_TOKEN_HEADER, tokensMatch } from './mcp-auth'
+import type { SessionStatus } from '../src/types'
 
 export type OpenSessionResult = { id: string; cwd: string }
+
+// What an orchestrator sees for a session it did not necessarily spawn.
+// `status` is the advisory state termhub already derives from Claude Code's
+// own JSONL file (see status-watcher.ts) — previously renderer-only, which
+// forced callers to scrape read_output to guess whether a worker was stuck.
+export type SessionSummary = {
+  id: string
+  name?: string
+  cwd: string
+  cli?: 'claude' | 'codex' | 'gemini'
+  status: SessionStatus
+  model?: string
+  permissionMode?: string
+  repoLabel?: string
+}
 
 export type McpHooks = {
   // Async because the implementation in main.ts serializes spawns and
@@ -32,6 +48,12 @@ export type McpHooks = {
     text?: string
     error?: string
   }
+  listSessions: () => { sessions: SessionSummary[] }
+  getSessionStatus: (req: { sessionId: string }) => {
+    session?: SessionSummary
+    error?: string
+  }
+  closeSession: (req: { sessionId: string }) => { ok: boolean; error?: string }
 }
 
 export type McpHandle = {
@@ -185,6 +207,50 @@ export async function startMcpServer(opts: {
         raw: typeof parsed.raw === 'boolean' ? parsed.raw : undefined,
       })
       respondJson(res, result.error ? 400 : 200, result)
+      return
+    }
+
+    if (req.url === MCP_ROUTES.LIST_SESSIONS && req.method === 'POST') {
+      // No body to parse — the caller wants everything termhub knows about.
+      respondJson(res, 200, opts.hooks.listSessions())
+      return
+    }
+
+    if (req.url === MCP_ROUTES.SESSION_STATUS && req.method === 'POST') {
+      const body = await readBody(req).catch(() => '')
+      let parsed: { sessionId?: unknown }
+      try {
+        parsed = body ? JSON.parse(body) : {}
+      } catch (err) {
+        console.warn('[termhub:mcp] session_status: invalid JSON in request body', err)
+        respondJson(res, 400, { error: 'invalid_json' })
+        return
+      }
+      if (typeof parsed.sessionId !== 'string') {
+        respondJson(res, 400, { error: 'sessionId must be a string' })
+        return
+      }
+      const result = opts.hooks.getSessionStatus({ sessionId: parsed.sessionId })
+      respondJson(res, result.error ? 400 : 200, result)
+      return
+    }
+
+    if (req.url === MCP_ROUTES.CLOSE_SESSION && req.method === 'POST') {
+      const body = await readBody(req).catch(() => '')
+      let parsed: { sessionId?: unknown }
+      try {
+        parsed = body ? JSON.parse(body) : {}
+      } catch (err) {
+        console.warn('[termhub:mcp] close_session: invalid JSON in request body', err)
+        respondJson(res, 400, { error: 'invalid_json' })
+        return
+      }
+      if (typeof parsed.sessionId !== 'string') {
+        respondJson(res, 400, { error: 'sessionId must be a string' })
+        return
+      }
+      const result = opts.hooks.closeSession({ sessionId: parsed.sessionId })
+      respondJson(res, result.ok ? 200 : 400, result)
       return
     }
 

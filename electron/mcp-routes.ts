@@ -7,6 +7,9 @@ export const MCP_ROUTES = {
   OPEN_SESSION: '/internal/open_session',
   SEND_INPUT: '/internal/send_input',
   READ_OUTPUT: '/internal/read_output',
+  LIST_SESSIONS: '/internal/list_sessions',
+  SESSION_STATUS: '/internal/session_status',
+  CLOSE_SESSION: '/internal/close_session',
 } as const
 
 export type McpRoute = (typeof MCP_ROUTES)[keyof typeof MCP_ROUTES]

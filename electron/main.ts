@@ -7,7 +7,7 @@
 import { app, BrowserWindow, ipcMain, Menu } from 'electron'
 import * as path from 'node:path'
 import * as fs from 'node:fs'
-import { startMcpServer, type McpHandle } from './mcp'
+import { startMcpServer, type McpHandle, type SessionSummary } from './mcp'
 import type { Config } from '../src/types'
 import { stripAnsi } from './output-buffer'
 import { writeBracketedPasteAndSubmit } from './claude-command'
@@ -17,10 +17,13 @@ import { resolveSessionCwd } from './cwd-resolve'
 import { loadPersistedSessions } from './persistence'
 import { isClaudeModelName } from './codex-command'
 import {
+  closeSession,
   createSessionInternal,
   findSessionByIdOrPrefix,
+  getAllSessions,
   killAllSessions,
   setMainWindow,
+  type Session,
 } from './session-manager'
 import { registerSessionHandlers } from './ipc-session'
 import { registerDiscoveryHandlers } from './ipc-discovery'
@@ -51,6 +54,22 @@ if (!app.isPackaged) {
 
 let mainWindow: BrowserWindow | null = null
 let mcpHandle: McpHandle | null = null
+
+// Project a live Session onto the MCP wire shape. Deliberately omits the PTY
+// handles, the output buffer, and the JSONL watcher — none of which are
+// serializable, and the buffer has its own tool (read_output).
+function toSessionSummary(s: Session): SessionSummary {
+  return {
+    id: s.id,
+    name: s.name,
+    cwd: s.cwd,
+    cli: s.cli,
+    status: s.status,
+    model: s.model,
+    permissionMode: s.permissionMode,
+    repoLabel: s.repoLabel,
+  }
+}
 
 function getBridgePath(): string {
   // dist/main/main.js → ../mcp-bridge.js → dist/mcp-bridge.js
@@ -316,6 +335,20 @@ app.whenReady().then(async () => {
             text = text.slice(text.length - maxChars)
           }
           return { text }
+        },
+        listSessions: () => ({ sessions: getAllSessions().map(toSessionSummary) }),
+        getSessionStatus: ({ sessionId }) => {
+          const result = findSessionByIdOrPrefix(sessionId)
+          if (!result.found) return { error: result.error }
+          return { session: toSessionSummary(result.session) }
+        },
+        closeSession: ({ sessionId }) => {
+          const result = findSessionByIdOrPrefix(sessionId)
+          if (!result.found) return { ok: false, error: result.error }
+          const closed = closeSession(result.session.id)
+          return closed
+            ? { ok: true }
+            : { ok: false, error: `Session ${result.session.id} could not be closed` }
         },
       },
     })
