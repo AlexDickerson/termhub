@@ -106,6 +106,16 @@ const api = {
     }
   },
 
+  // Main asks the renderer to select a session — currently fired when the
+  // user clicks the OS notification for a session that needs them.
+  onFocusRequest: (cb: (id: string) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, p: { id: string }) => cb(p.id)
+    ipcRenderer.on('session:focusRequest', handler)
+    return () => {
+      ipcRenderer.off('session:focusRequest', handler)
+    }
+  },
+
   onShellData: (cb: (id: string, data: string) => void): (() => void) => {
     const handler = (_e: Electron.IpcRendererEvent, p: DataPayload) =>
       cb(p.id, p.data)

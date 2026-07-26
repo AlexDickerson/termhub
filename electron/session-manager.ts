@@ -21,6 +21,12 @@ import { buildCodexCommand } from './codex-command'
 import { buildGeminiCommand } from './gemini-command'
 import { writePersistedSessions, type PersistedSession } from './persistence'
 import { getMcpConfigPath } from './config'
+import {
+  applyAttentionBadge,
+  countNeedingAttention,
+  notifyAttention,
+  shouldNotify,
+} from './attention'
 
 export type Session = {
   id: string
@@ -128,12 +134,37 @@ export function shouldEmitStatus(
 
 function setStatus(session: Session, next: SessionStatus): void {
   if (!shouldEmitStatus(statusEmitted, session.id, session.status, next)) return
+  const previous = session.status
   session.status = next
   statusEmitted.add(session.id)
   mainWindow?.webContents.send('session:status', {
     id: session.id,
     status: next,
   })
+
+  // Attention signalling rides on the same transition. Kept here rather than
+  // in the watcher so it covers every path that sets status, including the
+  // 'failed' set on PTY exit.
+  if (shouldNotify({ previous, next, windowFocused: mainWindow?.isFocused() ?? false })) {
+    notifyAttention({
+      sessionId: session.id,
+      name: session.name,
+      cwd: session.cwd,
+      status: next,
+      window: mainWindow,
+    })
+  }
+  refreshAttentionBadge()
+}
+
+// Recompute the dock badge / taskbar flash from live session state. Called
+// after any status change and after a session is removed, so closing the last
+// blocked session clears the badge.
+export function refreshAttentionBadge(): void {
+  applyAttentionBadge(
+    countNeedingAttention(Array.from(sessions.values(), (s) => s.status)),
+    mainWindow,
+  )
 }
 
 export function getSession(id: string): Session | undefined {
@@ -225,6 +256,7 @@ export function closeSession(id: string): boolean {
   }
   deleteSession(id)
   persistSessions()
+  refreshAttentionBadge()
   return true
 }
 
@@ -444,6 +476,9 @@ export function createSessionInternal(opts: {
     statusEmitted.delete(id)
     for (const cb of sessionClosedCallbacks) cb(id)
     if (wasPresent) persistSessions()
+    // A session that exited non-zero was counted as needing attention; now
+    // that it's out of the map the badge has to come back down.
+    refreshAttentionBadge()
   })
 
   // Shell PTY data/exit live on a parallel IPC channel. We deliberately do

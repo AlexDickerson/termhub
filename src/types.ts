@@ -103,6 +103,8 @@ export type TermhubApi = {
   onStatusChanged: (
     cb: (id: string, status: SessionStatus) => void,
   ) => () => void
+  // Main-initiated request to select a session (OS notification click).
+  onFocusRequest: (cb: (id: string) => void) => () => void
   onShellData: (cb: (id: string, data: string) => void) => () => void
   onShellExit: (cb: (id: string, exitCode: number) => void) => () => void
   onSessionAdded: (
