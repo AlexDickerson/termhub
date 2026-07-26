@@ -98,6 +98,11 @@ export function useSessions(refs: SessionRefs): UseSessionsResult {
         prev[id] === status ? prev : { ...prev, [id]: status },
       )
     })
+    // Clicking the OS notification for a blocked session should land the
+    // user on that session, not just raise the window.
+    const offFocusRequest = window.termhub.onFocusRequest((id) => {
+      setActiveId((prev) => (prev === id ? prev : id))
+    })
     // Shell PTY exiting independently (user typed `exit`) doesn't tear
     // the session down — only the primary exit does. We still drop the
     // xterm instance so a future re-init could replace it, but v1
@@ -155,6 +160,7 @@ export function useSessions(refs: SessionRefs): UseSessionsResult {
       offShellData()
       offExit()
       offStatus()
+      offFocusRequest()
       offShellExit()
       offAdded()
     }
