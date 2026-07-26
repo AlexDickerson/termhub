@@ -73,8 +73,18 @@ export const PERMISSION_MODES = [
   'auto',
 ] as const
 
+// A git repo discovered under the anchored repos directory. `path` matches
+// Session.repoRoot so the sidebar can merge live sessions into their project.
+export type ProjectDef = {
+  path: string
+  label: string
+}
+
 export type Config = {
   mcpPort: number
+  // Anchor directory scanned for projects to list in the sidebar. Unset means
+  // the user hasn't chosen one yet and the sidebar shows only live sessions.
+  reposDir?: string
   startupSessions: StartupSession[]
   bottomTerminal?: {
     shellId?: string
@@ -123,6 +133,11 @@ export type TermhubApi = {
   getConfig: () => Promise<Config>
   configPath: () => Promise<string>
   openConfigFile: () => Promise<void>
+  listProjects: () => Promise<ProjectDef[]>
+  getReposDir: () => Promise<string | null>
+  // Opens the folder picker and persists the choice; returns the new anchor,
+  // or null if the user cancelled.
+  setReposDir: () => Promise<string | null>
   readClipboard: () => Promise<string>
   writeClipboard: (text: string) => void
   onData: (cb: (id: string, data: string) => void) => () => void

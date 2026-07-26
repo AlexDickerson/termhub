@@ -268,14 +268,91 @@ body,
 }
 
 .group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 4px 12px;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--text-dim);
+}
+
+.group-title-label {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Per-project "start a session here" affordance. Hidden until the group is
+   hovered so a sidebar full of projects isn't a wall of + buttons. */
+.group-add-btn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.group:hover .group-add-btn,
+.group-add-btn:focus-visible {
+  opacity: 1;
+}
+
+.group-add-btn:hover {
+  color: var(--accent);
+}
+
+/* A discovered project with nothing running in it. */
+.item--dormant {
+  cursor: pointer;
+}
+
+.item-label--dormant {
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 11px;
+}
+
+.sidebar-empty {
+  padding: 16px 12px;
+  color: var(--text-dim);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebar-empty p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.sidebar-anchor-btn {
+  width: 100%;
+  margin-top: 6px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: inherit;
+  text-align: left;
+  padding: 2px 0 0;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-anchor-btn:hover {
+  color: var(--accent);
 }
 
 .group-list {

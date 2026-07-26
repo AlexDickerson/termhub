@@ -3,6 +3,7 @@ import type {
   AgentDef,
   Config,
   NewSessionOptions,
+  ProjectDef,
   SessionPr,
   SessionStatus,
   SessionUsage,
@@ -75,6 +76,11 @@ const api = {
 
   configPath: (): Promise<string> => ipcRenderer.invoke('config:path'),
   openConfigFile: (): Promise<void> => ipcRenderer.invoke('config:open'),
+  listProjects: (): Promise<ProjectDef[]> => ipcRenderer.invoke('projects:list'),
+  getReposDir: (): Promise<string | null> =>
+    ipcRenderer.invoke('projects:getReposDir'),
+  setReposDir: (): Promise<string | null> =>
+    ipcRenderer.invoke('projects:setReposDir'),
 
   readClipboard: (): Promise<string> => ipcRenderer.invoke('clipboard:read'),
 
