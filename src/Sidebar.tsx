@@ -262,15 +262,21 @@ export function Sidebar({
         <button className="new-btn sidebar-new-btn" onClick={onNew}>
           + New Session
         </button>
-        {reposDir && (
-          <button
-            className="sidebar-anchor-btn"
-            onClick={onChooseReposDir}
-            title={`Projects folder: ${reposDir}`}
-          >
-            {shortenPath(reposDir)}
-          </button>
-        )}
+        {/* Always rendered. The in-list empty state only appears when there
+            are no groups at all, and a first run auto-spawns the startup
+            orchestrator session — so gating this on reposDir left a new user
+            with no way to anchor the sidebar. */}
+        <button
+          className="sidebar-anchor-btn"
+          onClick={onChooseReposDir}
+          title={
+            reposDir
+              ? `Projects folder: ${reposDir}`
+              : 'Choose the folder that holds your projects'
+          }
+        >
+          {reposDir ? shortenPath(reposDir) : 'Choose projects folder…'}
+        </button>
       </div>
 
       {contextMenu && contextSession && (
