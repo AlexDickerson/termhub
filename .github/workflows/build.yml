@@ -101,3 +101,76 @@ jobs:
           name: termhub-macos-zip
           path: release/*-mac.zip
           if-no-files-found: error
+
+  # Turns a v* tag into an actual downloadable release. Without this the
+  # installers only existed as workflow artifacts, which expire and require
+  # a GitHub login plus digging through Actions to reach.
+  release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Verify tag matches package.json version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag v$TAG does not match package.json version $PKG."
+            echo "Artifact filenames are derived from package.json, so a mismatch"
+            echo "would publish a release whose assets are named for another version."
+            exit 1
+          fi
+          echo "Tag and package.json agree on $PKG."
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la artifacts
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > notes.md <<'NOTES'
+          ## Downloads
+
+          | Platform | File |
+          | --- | --- |
+          | Windows (installer) | `*-setup.exe` |
+          | Windows (portable) | `*-portable.exe` |
+          | macOS (Apple silicon) | `*-arm64.dmg` |
+
+          ### macOS: first launch
+
+          These builds are **not signed with an Apple Developer ID and not
+          notarized**, so Gatekeeper will refuse the first launch. After
+          dragging TermHub to Applications, clear the quarantine flag:
+
+          ```bash
+          xattr -dr com.apple.quarantine /Applications/TermHub.app
+          ```
+
+          Only Apple silicon (arm64) macOS builds are produced.
+
+          ### Windows
+
+          The installer is unsigned, so SmartScreen shows a warning on first
+          run — choose "More info" then "Run anyway".
+          NOTES
+
+          gh release create "$GITHUB_REF_NAME" \
+            --title "TermHub $GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            --generate-notes \
+            artifacts/*
