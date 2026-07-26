@@ -4,12 +4,15 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { startMcpServer, type McpHooks } from './mcp'
 import { MCP_ROUTES } from './mcp-routes'
+import { MCP_TOKEN_HEADER } from './mcp-auth'
 
 // Port 0 asks the OS for a free port; startMcpServer reports the real one back
 // on the handle. Fixed ports used to collide when more than one copy of this
 // suite ran at once (e.g. a stale worktree checkout) or when a dev instance of
 // termhub was already listening.
 const EPHEMERAL = 0
+
+const TOKEN = 'test-token-0123456789abcdef'
 
 function makeHooks(overrides: Partial<McpHooks> = {}): McpHooks {
   return {
@@ -23,7 +26,7 @@ function makeHooks(overrides: Partial<McpHooks> = {}): McpHooks {
 async function post(port: number, path: string, body: unknown): Promise<{ status: number; json: unknown }> {
   const res = await fetch(`http://127.0.0.1:${port}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', [MCP_TOKEN_HEADER]: TOKEN },
     body: JSON.stringify(body),
   })
   const json = await res.json()
@@ -37,7 +40,7 @@ describe('mcp HTTP server — error sanitization', () => {
   // Each test stands up its own server via start(); these hold the most
   // recent one so afterEach can tear it down.
   async function start(hooks: McpHooks) {
-    const handle = await startMcpServer({ port: EPHEMERAL, hooks })
+    const handle = await startMcpServer({ port: EPHEMERAL, token: TOKEN, hooks })
     port = handle.port
     close = handle.close
     return handle
@@ -76,7 +79,7 @@ describe('mcp HTTP server — error sanitization', () => {
 
     const res = await fetch(`http://127.0.0.1:${port}${MCP_ROUTES.OPEN_SESSION}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', [MCP_TOKEN_HEADER]: TOKEN },
       body: '{ not valid json !!!',
     })
     const json = await res.json()
@@ -95,7 +98,7 @@ describe('mcp HTTP server — error sanitization', () => {
 
     const res = await fetch(`http://127.0.0.1:${port}${MCP_ROUTES.SEND_INPUT}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', [MCP_TOKEN_HEADER]: TOKEN },
       body: '<<bad>>',
     })
     const json = await res.json()
@@ -114,7 +117,7 @@ describe('mcp HTTP server — error sanitization', () => {
 
     const res = await fetch(`http://127.0.0.1:${port}${MCP_ROUTES.READ_OUTPUT}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', [MCP_TOKEN_HEADER]: TOKEN },
       body: 'not-json',
     })
     const json = await res.json()
@@ -124,6 +127,50 @@ describe('mcp HTTP server — error sanitization', () => {
     expect(body).not.toContain('at /')
     expect(body).not.toContain('SyntaxError')
     expect((json as { error: string }).error).toBe('invalid_json')
+  })
+
+  // ── auth ─────────────────────────────────────────────────────────────────
+
+  it('rejects a request with no token', async () => {
+    let opened = false
+    await start(makeHooks({ openClaudeSession: () => { opened = true; return { id: 'x', cwd: '/tmp' } } }))
+
+    const res = await fetch(`http://127.0.0.1:${port}${MCP_ROUTES.OPEN_SESSION}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cwd: '/tmp' }),
+    })
+
+    expect(res.status).toBe(401)
+    expect((await res.json() as { error: string }).error).toBe('unauthorized')
+    // The hook must not have run — a 401 that still spawned a session would
+    // defeat the point of the check.
+    expect(opened).toBe(false)
+  })
+
+  it('rejects a request with the wrong token', async () => {
+    await start(makeHooks())
+
+    const res = await fetch(`http://127.0.0.1:${port}${MCP_ROUTES.OPEN_SESSION}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [MCP_TOKEN_HEADER]: 'not-the-token' },
+      body: JSON.stringify({ cwd: '/tmp' }),
+    })
+
+    expect(res.status).toBe(401)
+  })
+
+  it('authenticates send_input and read_output too, not just open_session', async () => {
+    await start(makeHooks())
+
+    for (const route of [MCP_ROUTES.SEND_INPUT, MCP_ROUTES.READ_OUTPUT]) {
+      const res = await fetch(`http://127.0.0.1:${port}${route}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: 'a', text: 'b' }),
+      })
+      expect(res.status, `${route} must require auth`).toBe(401)
+    }
   })
 
   // ── regression: happy paths still work ───────────────────────────────────

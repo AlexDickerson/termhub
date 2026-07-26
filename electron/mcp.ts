@@ -5,6 +5,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { MCP_ROUTES } from './mcp-routes'
+import { MCP_TOKEN_HEADER, tokensMatch } from './mcp-auth'
 
 export type OpenSessionResult = { id: string; cwd: string }
 
@@ -61,10 +62,23 @@ function respondJson(res: ServerResponse, status: number, body: unknown) {
 
 export async function startMcpServer(opts: {
   port: number
+  token: string
   hooks: McpHooks
 }): Promise<McpHandle> {
   const httpServer = createServer(async (req, res) => {
     console.log(`[termhub:mcp] ${req.method} ${req.url}`)
+
+    // Every /internal/* route is authenticated. Binding 127.0.0.1 keeps this
+    // off the network but not away from other local processes, and these
+    // routes can spawn a permission-bypassing session in any directory.
+    const presented = req.headers[MCP_TOKEN_HEADER]
+    if (!tokensMatch(opts.token, Array.isArray(presented) ? presented[0] : presented)) {
+      console.warn(
+        `[termhub:mcp] rejected unauthenticated ${req.method} ${req.url} from ${req.socket.remoteAddress}`,
+      )
+      respondJson(res, 401, { error: 'unauthorized' })
+      return
+    }
 
     if (req.url === MCP_ROUTES.OPEN_SESSION && req.method === 'POST') {
       const body = await readBody(req).catch(() => '')

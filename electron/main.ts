@@ -11,7 +11,8 @@ import { startMcpServer, type McpHandle } from './mcp'
 import type { Config } from '../src/types'
 import { stripAnsi } from './output-buffer'
 import { writeBracketedPasteAndSubmit } from './claude-command'
-import { getMcpConfigPath, loadConfig } from './config'
+import { getMcpConfigPath, getMcpTokenPath, loadConfig } from './config'
+import { MCP_TOKEN_HEADER, getOrCreateToken } from './mcp-auth'
 import { resolveSessionCwd } from './cwd-resolve'
 import { loadPersistedSessions } from './persistence'
 import { isClaudeModelName } from './codex-command'
@@ -59,7 +60,7 @@ function getBridgePath(): string {
 // Write the MCP config file that claude reads to discover the termhub
 // MCP server. Uses stdio transport: claude spawns the bridge subprocess
 // and pipes JSON-RPC over stdin/stdout. No HTTP, no OAuth flow.
-function writeMcpConfigFile(port: number): void {
+function writeMcpConfigFile(port: number, token: string): void {
   const configPath = getMcpConfigPath()
   const body = {
     mcpServers: {
@@ -70,13 +71,20 @@ function writeMcpConfigFile(port: number): void {
         env: {
           ELECTRON_RUN_AS_NODE: '1',
           TERMHUB_PORT: String(port),
+          // Authenticates the bridge to the internal HTTP endpoint. This is
+          // how the bridge is distinguished from any other local process that
+          // could otherwise reach 127.0.0.1:<port>.
+          TERMHUB_TOKEN: token,
         },
       },
     },
   }
   fs.mkdirSync(path.dirname(configPath), { recursive: true })
-  fs.writeFileSync(configPath, JSON.stringify(body, null, 2))
-  console.log(`[termhub] wrote MCP config to ${configPath}`)
+  // 0600: the file carries the internal API token.
+  fs.writeFileSync(configPath, JSON.stringify(body, null, 2), { mode: 0o600 })
+  console.log(
+    `[termhub] wrote MCP config to ${configPath} (port ${port}, auth via ${MCP_TOKEN_HEADER})`,
+  )
 }
 
 function createWindow(): void {
@@ -211,7 +219,8 @@ app.whenReady().then(async () => {
 
   const config = loadConfig()
   initBottomShell()
-  writeMcpConfigFile(config.mcpPort)
+  const mcpToken = getOrCreateToken(getMcpTokenPath())
+  writeMcpConfigFile(config.mcpPort, mcpToken)
 
   // Serialize MCP open_session calls. The orchestrator can fan out N
   // parallel open_session requests; we chain each through this queue
@@ -227,6 +236,7 @@ app.whenReady().then(async () => {
   try {
     mcpHandle = await startMcpServer({
       port: config.mcpPort,
+      token: mcpToken,
       hooks: {
         openClaudeSession: async ({
           cwd,

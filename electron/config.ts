@@ -41,6 +41,13 @@ export function getSessionsPath(): string {
   return path.join(app.getPath('userData'), 'sessions.json')
 }
 
+// Shared secret for the internal HTTP endpoint. Deliberately its own file
+// rather than a config.json key — config.json is documented as user-editable
+// and gets pretty-printed on save; this one is 0600 and machine-managed.
+export function getMcpTokenPath(): string {
+  return path.join(app.getPath('userData'), 'mcp-token')
+}
+
 export function saveConfig(config: Config): void {
   const configPath = getConfigPath()
   try {

@@ -13,9 +13,21 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { MCP_ROUTES } from './mcp-routes'
+import { MCP_TOKEN_HEADER } from './mcp-auth'
 
 const port = Number.parseInt(process.env.TERMHUB_PORT ?? '7787', 10)
 const baseUrl = `http://127.0.0.1:${port}`
+
+// Set by termhub when it writes mcp-config.json (see writeMcpConfigFile in
+// electron/main.ts). Without it every /internal/* call comes back 401 — that
+// is the intended failure mode for anything that isn't the bridge termhub
+// itself configured.
+const token = process.env.TERMHUB_TOKEN ?? ''
+
+const jsonHeaders = {
+  'Content-Type': 'application/json',
+  [MCP_TOKEN_HEADER]: token,
+}
 
 async function main() {
   const server = new McpServer({
@@ -116,7 +128,7 @@ async function main() {
       try {
         const response = await fetch(`${baseUrl}${MCP_ROUTES.OPEN_SESSION}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: jsonHeaders,
           body: JSON.stringify({
             cwd: args.cwd,
             prompt: args.prompt,
@@ -181,7 +193,7 @@ async function main() {
       try {
         const response = await fetch(`${baseUrl}${MCP_ROUTES.SEND_INPUT}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: jsonHeaders,
           body: JSON.stringify({ sessionId: args.sessionId, text: args.text }),
         })
         const json = (await response.json().catch(() => ({}))) as {
@@ -233,7 +245,7 @@ async function main() {
       try {
         const response = await fetch(`${baseUrl}${MCP_ROUTES.READ_OUTPUT}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: jsonHeaders,
           body: JSON.stringify({
             sessionId: args.sessionId,
             maxChars: args.maxChars,
