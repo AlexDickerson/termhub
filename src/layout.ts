@@ -31,6 +31,18 @@ export function clampDimension(
 export const clampHeight = clampDimension
 export const clampWidth = clampDimension
 
+// Clamp a bottom-pane height against the space actually available, with the
+// split's own min/max bound in.
+//
+// This has to run on load and on window resize, not just while dragging.
+// .main-bottom is `flex: 0 0 auto`, so it cannot shrink: a height persisted in
+// a tall window squeezes .main-top toward zero in a shorter one, and past the
+// container it spills and gets clipped by `.main { overflow: hidden }` — which
+// looks like the claude terminal being cut off by the shell selector.
+export function clampBottomHeight(raw: number, available: number): number {
+  return clampDimension(raw, BOTTOM_MIN_HEIGHT, BOTTOM_MAX_FRACTION, available)
+}
+
 /**
  * Read the persisted bottom-terminal height from localStorage.
  * Falls back to `defaultHeight` when the stored value is absent or
