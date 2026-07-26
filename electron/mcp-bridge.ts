@@ -14,6 +14,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { MCP_ROUTES } from './mcp-routes'
 import { MCP_TOKEN_HEADER } from './mcp-auth'
+import type { SessionSummary } from './mcp'
 
 const port = Number.parseInt(process.env.TERMHUB_PORT ?? '7787', 10)
 const baseUrl = `http://127.0.0.1:${port}`
@@ -27,6 +28,17 @@ const token = process.env.TERMHUB_TOKEN ?? ''
 const jsonHeaders = {
   'Content-Type': 'application/json',
   [MCP_TOKEN_HEADER]: token,
+}
+
+// One line per session. Kept terse on purpose: an orchestrator polling a dozen
+// workers pays for every token, and the id + status + name are what it acts on.
+export function formatSession(s: SessionSummary): string {
+  const bits = [`${s.id}  [${s.status}]`]
+  if (s.name) bits.push(s.name)
+  bits.push(s.cwd)
+  const meta = [s.cli, s.model, s.permissionMode].filter(Boolean)
+  if (meta.length > 0) bits.push(`(${meta.join(', ')})`)
+  return bits.join('  ')
 }
 
 async function main() {
@@ -265,6 +277,151 @@ async function main() {
         return {
           content: [{ type: 'text', text: json.text ?? '(no output)' }],
         }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return {
+          content: [{ type: 'text', text: `Failed to reach termhub: ${msg}` }],
+          isError: true,
+        }
+      }
+    },
+  )
+
+  server.registerTool(
+    'list_sessions',
+    {
+      title: 'List all termhub sessions',
+      description:
+        'Returns every session termhub currently has open — including ones this ' +
+        'orchestrator did not spawn, and ones resumed from a previous run. Each entry ' +
+        'carries id, name, cwd, cli, model, permissionMode and current status. ' +
+        'Use this to recover session ids after a restart, or to survey what is running ' +
+        'before deciding what to steer.',
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        const response = await fetch(`${baseUrl}${MCP_ROUTES.LIST_SESSIONS}`, {
+          method: 'POST',
+          headers: jsonHeaders,
+        })
+        const json = (await response.json().catch(() => ({}))) as {
+          sessions?: SessionSummary[]
+          error?: string
+        }
+        if (!response.ok || json.error) {
+          return {
+            content: [
+              { type: 'text', text: `Failed: ${json.error ?? `HTTP ${response.status}`}` },
+            ],
+            isError: true,
+          }
+        }
+        const sessions = json.sessions ?? []
+        if (sessions.length === 0) {
+          return { content: [{ type: 'text', text: 'No sessions open.' }] }
+        }
+        return {
+          content: [
+            {
+              type: 'text',
+              text: sessions.map(formatSession).join('\n'),
+            },
+          ],
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return {
+          content: [{ type: 'text', text: `Failed to reach termhub: ${msg}` }],
+          isError: true,
+        }
+      }
+    },
+  )
+
+  server.registerTool(
+    'get_session_status',
+    {
+      title: 'Get the current status of a termhub session',
+      description:
+        'Returns the advisory status of one session without pulling its output. ' +
+        "Values: 'working' (generating or running tools), 'awaiting' (paused for a " +
+        "permission prompt or question — needs you), 'idle' (at the input prompt, " +
+        "ready for the next message), 'failed' (process died non-zero). " +
+        'Prefer this over polling read_output and guessing from the text. ' +
+        'Status is sourced from Claude Code\'s own session file, so it is only ' +
+        "meaningful for cli: 'claude' sessions.",
+      inputSchema: {
+        sessionId: z
+          .string()
+          .describe('Full session id (or unambiguous prefix) returned by open_session'),
+      },
+    },
+    async (args) => {
+      try {
+        const response = await fetch(`${baseUrl}${MCP_ROUTES.SESSION_STATUS}`, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify({ sessionId: args.sessionId }),
+        })
+        const json = (await response.json().catch(() => ({}))) as {
+          session?: SessionSummary
+          error?: string
+        }
+        if (!response.ok || json.error || !json.session) {
+          return {
+            content: [
+              { type: 'text', text: `Failed: ${json.error ?? `HTTP ${response.status}`}` },
+            ],
+            isError: true,
+          }
+        }
+        return { content: [{ type: 'text', text: formatSession(json.session) }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return {
+          content: [{ type: 'text', text: `Failed to reach termhub: ${msg}` }],
+          isError: true,
+        }
+      }
+    },
+  )
+
+  server.registerTool(
+    'close_session',
+    {
+      title: 'Close a termhub session',
+      description:
+        'Terminates a session and removes it from the sidebar. Kills the underlying ' +
+        'CLI process and the session\'s docked shell. This is not reversible — the ' +
+        'session is gone, though claude can be resumed later in the same directory. ' +
+        'Use it to reap finished workers so the sidebar reflects live work.',
+      inputSchema: {
+        sessionId: z
+          .string()
+          .describe('Full session id (or unambiguous prefix) returned by open_session'),
+      },
+    },
+    async (args) => {
+      try {
+        const response = await fetch(`${baseUrl}${MCP_ROUTES.CLOSE_SESSION}`, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify({ sessionId: args.sessionId }),
+        })
+        const json = (await response.json().catch(() => ({}))) as {
+          ok?: boolean
+          error?: string
+        }
+        if (!response.ok || !json.ok) {
+          return {
+            content: [
+              { type: 'text', text: `Failed: ${json.error ?? `HTTP ${response.status}`}` },
+            ],
+            isError: true,
+          }
+        }
+        return { content: [{ type: 'text', text: `Closed session ${args.sessionId}.` }] }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return {

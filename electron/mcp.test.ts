@@ -2,7 +2,7 @@
 // (CodeQL js/stack-trace-exposure: error details must not reach the caller).
 
 import { describe, it, expect, afterEach } from 'vitest'
-import { startMcpServer, type McpHooks } from './mcp'
+import { startMcpServer, type McpHooks, type SessionSummary } from './mcp'
 import { MCP_ROUTES } from './mcp-routes'
 import { MCP_TOKEN_HEADER } from './mcp-auth'
 
@@ -14,11 +14,24 @@ const EPHEMERAL = 0
 
 const TOKEN = 'test-token-0123456789abcdef'
 
+const SESSION: SessionSummary = {
+  id: 'sess-1',
+  name: 'worker',
+  cwd: '/tmp/repo',
+  cli: 'claude',
+  status: 'awaiting',
+  model: 'claude-opus-5',
+  permissionMode: 'plan',
+}
+
 function makeHooks(overrides: Partial<McpHooks> = {}): McpHooks {
   return {
     openClaudeSession: () => ({ id: 'test-id', cwd: '/tmp' }),
     sendInput: () => ({ ok: true }),
     readOutput: () => ({ text: 'output' }),
+    listSessions: () => ({ sessions: [SESSION] }),
+    getSessionStatus: () => ({ session: SESSION }),
+    closeSession: () => ({ ok: true }),
     ...overrides,
   }
 }
@@ -127,6 +140,106 @@ describe('mcp HTTP server — error sanitization', () => {
     expect(body).not.toContain('at /')
     expect(body).not.toContain('SyntaxError')
     expect((json as { error: string }).error).toBe('invalid_json')
+  })
+
+  // ── list_sessions / session_status / close_session ───────────────────────
+
+  it('list_sessions returns every session, including ones the caller did not spawn', async () => {
+    const others: SessionSummary[] = [
+      SESSION,
+      { id: 'sess-2', cwd: '/tmp/other', status: 'idle', cli: 'codex' },
+    ]
+    await start(makeHooks({ listSessions: () => ({ sessions: others }) }))
+
+    const { status, json } = await post(port, MCP_ROUTES.LIST_SESSIONS, {})
+
+    expect(status).toBe(200)
+    expect((json as { sessions: SessionSummary[] }).sessions).toEqual(others)
+  })
+
+  it('list_sessions returns an empty list rather than erroring when nothing is open', async () => {
+    await start(makeHooks({ listSessions: () => ({ sessions: [] }) }))
+
+    const { status, json } = await post(port, MCP_ROUTES.LIST_SESSIONS, {})
+
+    expect(status).toBe(200)
+    expect((json as { sessions: SessionSummary[] }).sessions).toEqual([])
+  })
+
+  it('session_status surfaces the advisory status for one session', async () => {
+    await start(makeHooks())
+
+    const { status, json } = await post(port, MCP_ROUTES.SESSION_STATUS, {
+      sessionId: 'sess-1',
+    })
+
+    expect(status).toBe(200)
+    expect((json as { session: SessionSummary }).session.status).toBe('awaiting')
+  })
+
+  it('session_status 400s on an unknown session', async () => {
+    await start(makeHooks({ getSessionStatus: () => ({ error: 'No session found for "nope"' }) }))
+
+    const { status, json } = await post(port, MCP_ROUTES.SESSION_STATUS, {
+      sessionId: 'nope',
+    })
+
+    expect(status).toBe(400)
+    expect((json as { error: string }).error).toContain('No session found')
+  })
+
+  it('session_status rejects a missing sessionId', async () => {
+    await start(makeHooks())
+
+    const { status } = await post(port, MCP_ROUTES.SESSION_STATUS, {})
+    expect(status).toBe(400)
+  })
+
+  it('close_session reports ok and passes the id through', async () => {
+    const closed: string[] = []
+    await start(
+      makeHooks({
+        closeSession: ({ sessionId }) => {
+          closed.push(sessionId)
+          return { ok: true }
+        },
+      }),
+    )
+
+    const { status } = await post(port, MCP_ROUTES.CLOSE_SESSION, { sessionId: 'sess-1' })
+
+    expect(status).toBe(200)
+    expect(closed).toEqual(['sess-1'])
+  })
+
+  it('close_session 400s when the session does not resolve', async () => {
+    await start(
+      makeHooks({ closeSession: () => ({ ok: false, error: 'No session found for "gone"' }) }),
+    )
+
+    const { status, json } = await post(port, MCP_ROUTES.CLOSE_SESSION, {
+      sessionId: 'gone',
+    })
+
+    expect(status).toBe(400)
+    expect((json as { error: string }).error).toContain('No session found')
+  })
+
+  it('the new routes are authenticated too', async () => {
+    await start(makeHooks())
+
+    for (const route of [
+      MCP_ROUTES.LIST_SESSIONS,
+      MCP_ROUTES.SESSION_STATUS,
+      MCP_ROUTES.CLOSE_SESSION,
+    ]) {
+      const res = await fetch(`http://127.0.0.1:${port}${route}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: 'sess-1' }),
+      })
+      expect(res.status, `${route} must require auth`).toBe(401)
+    }
   })
 
   // ── auth ─────────────────────────────────────────────────────────────────

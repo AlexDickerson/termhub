@@ -9,6 +9,9 @@ describe('MCP_ROUTES', () => {
     expect(MCP_ROUTES.OPEN_SESSION).toBe('/internal/open_session')
     expect(MCP_ROUTES.SEND_INPUT).toBe('/internal/send_input')
     expect(MCP_ROUTES.READ_OUTPUT).toBe('/internal/read_output')
+    expect(MCP_ROUTES.LIST_SESSIONS).toBe('/internal/list_sessions')
+    expect(MCP_ROUTES.SESSION_STATUS).toBe('/internal/session_status')
+    expect(MCP_ROUTES.CLOSE_SESSION).toBe('/internal/close_session')
   })
 
   it('routes are unique', () => {
