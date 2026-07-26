@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Session, SessionStatus } from './types'
+import type { SidebarGroup } from './sidebar-groups'
 
 type ContextMenu = {
   sessionId: string
@@ -9,13 +10,19 @@ type ContextMenu = {
 }
 
 type Props = {
-  groups: Map<string, Session[]>
+  groups: SidebarGroup[]
   activeId: string | null
   statuses: Record<string, SessionStatus>
   onNew: () => void
+  // Start a session in a specific project — opens the new-session dialog with
+  // the folder pre-filled.
+  onNewInProject: (cwd: string) => void
   onSelect: (id: string) => void
   onClose: (id: string) => void
   onRename: (id: string, name: string) => Promise<void>
+  // Null when the user hasn't anchored a repos directory yet.
+  reposDir: string | null
+  onChooseReposDir: () => void
   style?: CSSProperties
   isCollapsed?: boolean
   onToggleCollapse?: () => void
@@ -33,9 +40,12 @@ export function Sidebar({
   activeId,
   statuses,
   onNew,
+  onNewInProject,
   onSelect,
   onClose,
   onRename,
+  reposDir,
+  onChooseReposDir,
   style,
   isCollapsed,
   onToggleCollapse,
@@ -48,7 +58,8 @@ export function Sidebar({
 
   // Find the session object from context menu id
   const contextSession = contextMenu
-    ? [...groups.values()].flat().find((s) => s.id === contextMenu.sessionId) ?? null
+    ? groups.flatMap((g) => g.sessions).find((s) => s.id === contextMenu.sessionId) ??
+      null
     : null
 
   // Close context menu on outside click or Escape
@@ -139,15 +150,49 @@ export function Sidebar({
         ‹
       </button>
       <div className="groups">
-        {[...groups.entries()].map(([groupKey, list]) => {
-          const first = list[0]
-          const label = first?.repoLabel ?? shortenPath(first?.cwd ?? groupKey)
-          const titleAttr = first?.repoRoot ?? first?.cwd ?? groupKey
+        {groups.length === 0 && (
+          <div className="sidebar-empty">
+            {reposDir ? (
+              <p>No projects found in {shortenPath(reposDir)}.</p>
+            ) : (
+              <p>Anchor termhub to the folder that holds your projects.</p>
+            )}
+            <button className="new-btn" onClick={onChooseReposDir}>
+              Choose projects folder…
+            </button>
+          </div>
+        )}
+        {groups.map((group) => {
+          const { key: groupKey, label, sessions: list } = group
+          const titleAttr = groupKey
           return (
           <div className="group" key={groupKey}>
             <div className="group-title" title={titleAttr}>
-              {label}
+              <span className="group-title-label">{label}</span>
+              {group.isProject && (
+                <button
+                  className="group-add-btn"
+                  title={`New session in ${label}`}
+                  aria-label={`New session in ${label}`}
+                  onClick={() => onNewInProject(groupKey)}
+                >
+                  +
+                </button>
+              )}
             </div>
+            {group.isProject && list.length === 0 && (
+              <ul className="group-list">
+                <li
+                  className="item item--dormant"
+                  onClick={() => onNewInProject(groupKey)}
+                  title={`Start a session in ${label}`}
+                >
+                  <span className="item-label item-label--dormant">
+                    No sessions — click to start one
+                  </span>
+                </li>
+              </ul>
+            )}
             <ul className="group-list">
               {list.map((s, idx) => {
                 const status = statuses[s.id] ?? 'idle'
@@ -217,6 +262,15 @@ export function Sidebar({
         <button className="new-btn sidebar-new-btn" onClick={onNew}>
           + New Session
         </button>
+        {reposDir && (
+          <button
+            className="sidebar-anchor-btn"
+            onClick={onChooseReposDir}
+            title={`Projects folder: ${reposDir}`}
+          >
+            {shortenPath(reposDir)}
+          </button>
+        )}
       </div>
 
       {contextMenu && contextSession && (

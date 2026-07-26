@@ -10,7 +10,13 @@ import { ConfirmCloseModal } from './ConfirmCloseModal'
 import { NewSessionModal } from './NewSessionModal'
 import { Toasts } from './Toasts'
 import { useToasts } from './useToasts'
-import type { AgentDef, NewSessionOptions, Session, ShellInfo } from './types'
+import type {
+  AgentDef,
+  NewSessionOptions,
+  ProjectDef,
+  ShellInfo,
+} from './types'
+import { buildSidebarGroups } from './sidebar-groups'
 import type { TerminalEntry } from './useXterm'
 import { useSessions } from './useSessions'
 import { useSplitLayout } from './useSplitLayout'
@@ -136,6 +142,10 @@ export default function App() {
   // the next session wants to start.
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null)
   const [agents, setAgents] = useState<AgentDef[]>([])
+  // Projects discovered under the anchored repos directory. These populate the
+  // sidebar even when they have no live session.
+  const [projects, setProjects] = useState<ProjectDef[]>([])
+  const [reposDir, setReposDir] = useState<string | null>(null)
   // Session id pending close confirmation, or null when no dialog is open.
   const [pendingCloseId, setPendingCloseId] = useState<string | null>(null)
 
@@ -268,7 +278,53 @@ export default function App() {
     }
   }, [reportError])
 
-  const grouped = useMemo(() => groupSessions(sessions), [sessions])
+  // Refresh the project list. Cheap enough to re-run on demand; the walk stops
+  // at each repo root so it doesn't crawl whole trees.
+  const refreshProjects = useCallback(async () => {
+    try {
+      const [dir, found] = await Promise.all([
+        window.termhub.getReposDir(),
+        window.termhub.listProjects(),
+      ])
+      setReposDir(dir)
+      setProjects(found)
+    } catch (err) {
+      reportError('Could not list projects', err)
+    }
+  }, [reportError])
+
+  useEffect(() => {
+    void refreshProjects()
+  }, [refreshProjects])
+
+  const handleChooseReposDir = useCallback(async () => {
+    try {
+      const picked = await window.termhub.setReposDir()
+      if (picked) await refreshProjects()
+    } catch (err) {
+      reportError('Could not set the projects folder', err)
+    }
+  }, [refreshProjects, reportError])
+
+  // Start a session in a specific project: same dialog as + New Session, with
+  // the folder already filled in.
+  const handleNewInProject = useCallback(
+    async (cwd: string) => {
+      try {
+        setAgents(await window.termhub.listAgents())
+      } catch (err) {
+        console.warn('[termhub] listAgents failed; agent picker will be empty', err)
+        setAgents([])
+      }
+      setNewSessionCwd(cwd)
+    },
+    [],
+  )
+
+  const grouped = useMemo(
+    () => buildSidebarGroups(projects, sessions),
+    [projects, sessions],
+  )
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeId) ?? null,
     [sessions, activeId],
@@ -283,7 +339,10 @@ export default function App() {
           activeId={activeId}
           statuses={statuses}
           onNew={openNewSession}
+          onNewInProject={handleNewInProject}
           onSelect={setActiveId}
+          reposDir={reposDir}
+          onChooseReposDir={handleChooseReposDir}
           onClose={requestClose}
           onRename={renameSession}
           style={{ width: leftCollapsed ? SIDEBAR_COLLAPSED_WIDTH : leftWidth }}
@@ -371,13 +430,4 @@ export default function App() {
 // map key is the group key (repoRoot or cwd); Sidebar reads the label
 // from the first session in the group via session.repoLabel or derives
 // it from the cwd.
-function groupSessions(sessions: Session[]): Map<string, Session[]> {
-  const m = new Map<string, Session[]>()
-  for (const s of sessions) {
-    const key = s.repoRoot ?? s.cwd
-    const list = m.get(key) ?? []
-    list.push(s)
-    m.set(key, list)
-  }
-  return m
-}
+

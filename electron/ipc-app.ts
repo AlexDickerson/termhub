@@ -12,7 +12,8 @@ import { spawn } from 'node:child_process'
 import type { Config } from '../src/types'
 import { isAllowedExternalUrl } from './links'
 import { openExternalUrl } from './opener'
-import { getConfigPath } from './config'
+import { getConfigPath, saveConfig } from './config'
+import { discoverProjects } from './project-discovery'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -21,6 +22,30 @@ export function setMainWindow(window: BrowserWindow | null): void {
 }
 
 export function registerAppHandlers(opts: { config: Config }): void {
+  // The anchored repos directory. Held on the live config object so a change
+  // takes effect without a restart; persisted so it survives one.
+  ipcMain.handle('projects:getReposDir', () => opts.config.reposDir ?? null)
+
+  ipcMain.handle('projects:list', () => {
+    if (!opts.config.reposDir) return []
+    return discoverProjects(opts.config.reposDir)
+  })
+
+  ipcMain.handle('projects:setReposDir', async () => {
+    if (!mainWindow) return null
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose the folder that holds your projects',
+      defaultPath: opts.config.reposDir ?? os.homedir(),
+      properties: ['openDirectory'],
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    const picked = result.filePaths[0]
+    opts.config.reposDir = picked
+    saveConfig(opts.config)
+    console.log(`[termhub:projects] repos directory set to ${picked}`)
+    return picked
+  })
+
   ipcMain.handle('vscode:open', (_event, cwd: string) => {
     return new Promise<void>((resolve, reject) => {
       const proc = spawn('code', [cwd], {
