@@ -183,11 +183,18 @@ export async function startMcpServer(opts: {
     httpServer.listen(opts.port, '127.0.0.1', () => resolve())
   })
 
-  const url = `http://127.0.0.1:${opts.port}`
+  // Read the port back off the socket rather than trusting opts.port: passing
+  // 0 asks the OS for a free port, which tests rely on to avoid colliding
+  // with each other or with a running termhub instance.
+  const address = httpServer.address()
+  const boundPort =
+    typeof address === 'object' && address !== null ? address.port : opts.port
+
+  const url = `http://127.0.0.1:${boundPort}`
   console.log(`[termhub:mcp] internal HTTP API listening on ${url}${MCP_ROUTES.OPEN_SESSION}`)
 
   return {
-    port: opts.port,
+    port: boundPort,
     url,
     close: async () => {
       await new Promise<void>((resolve) => httpServer.close(() => resolve()))
