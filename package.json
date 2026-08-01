@@ -112,7 +112,7 @@
     "typescript": "^5.6.3",
     "vite": "^6.4.2",
     "vitest": "^3.2.7",
-    "wait-on": "^8.0.1"
+    "wait-on": "^9.1.0"
   },
   "lint-staged": {
     "*.{ts,tsx,js,json,md,html,css}": "secretlint"
